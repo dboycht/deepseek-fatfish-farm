@@ -177,12 +177,12 @@ export function parseCiteAnchors(text: string): string[] {
 }
 
 export function parseDrawToken(text: string): string | null {
-  const m = text.match(/\[\[draw:\s*([^\]]{3,400})\]\]/i)
+  const m = text.match(/\[{1,2}\s*draw:\s*([^\]]{3,400})\]{1,2}/i)
   return m ? m[1].trim() : null
 }
 
 export function parseStickerToken(text: string): string | null {
-  const m = text.match(/\[\[fish:\s*([a-z]+)\s*\]\]/i)
+  const m = text.match(/\[{1,2}\s*fish:\s*([a-z]+)\s*\]{1,2}/i)
   if (!m) return null
   const name = m[1].toLowerCase()
   return (STICKERS as readonly string[]).includes(name) ? name : null

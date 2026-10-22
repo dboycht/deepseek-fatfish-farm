@@ -282,8 +282,8 @@ async function runTurn(input: SendInput): Promise<void> {
     const drawPrompt = !isMock && cfg.memory.allowDraw && imageEp ? parseDrawToken(text) : null
     sticker = sticker ?? parseStickerToken(text) ?? undefined
     const clean = text
-      .replace(/\[\[fish:\s*[a-z]+\s*\]\]/gi, '')
-      .replace(/\[\[draw:[\s\S]*?\]\]/gi, '')
+      .replace(/\[{1,2}\s*fish:\s*[a-z]+\s*\]{1,2}/gi, '')
+      .replace(/\[{1,2}\s*draw:[\s\S]*?\]{1,2}/gi, '')
       .replace(/[ \t]+\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
@@ -973,10 +973,13 @@ function registerIpc(): void {
       `(() => {
          const ms = [...document.querySelectorAll('.msg')];
          const first = ms[0];
+         const b = document.querySelector('.msg .bubble');
+         const rt = b ? b.querySelector('.rt') : null;
          return {
            count: ms.length,
            first: first ? { h: first.getBoundingClientRect().height, opacity: getComputedStyle(first).opacity } : null,
-           reduce: matchMedia('(prefers-reduced-motion: reduce)').matches
+           bubble: b ? { h: b.getBoundingClientRect().height, ws: getComputedStyle(b).whiteSpace } : null,
+           rt: rt ? { h: rt.getBoundingClientRect().height, ps: rt.querySelectorAll('p').length } : null
          };
        })()`
     )

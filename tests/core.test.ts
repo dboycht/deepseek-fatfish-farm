@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scoreCards, tokenize } from '../src/shared/recall'
 import { flavorFromSeed, levelFromExp, moodWord, personaFromSeed } from '../src/shared/persona'
-import { buildMessages } from '../src/main/llm/prompt'
+import { buildMessages, parseStickerToken } from '../src/main/llm/prompt'
 import type { ChatMessage, FishProfile } from '../src/shared/types'
 import {
   defaultConfig,
@@ -304,6 +304,13 @@ test('路由：provider 丢失时回退第一个，模型丢失时回退 provide
   assert.equal(providerForRoute(cfg, 'text')?.id, 'a')
   cfg.routes.text.model = 'a-2'
   assert.equal(modelForRoute(cfg, 'text'), 'a-2')
+})
+
+test('贴纸 token：双层与模型偶发的单层方括号都能识别', () => {
+  assert.equal(parseStickerToken('好耶 [[fish:joy]]'), 'joy')
+  assert.equal(parseStickerToken('好耶 [fish:shy]'), 'shy')
+  assert.equal(parseStickerToken('[fish:not-a-sticker]'), null)
+  assert.equal(parseStickerToken('没有贴纸'), null)
 })
 
 test('提示词：当前用户消息不会在历史里出现两次', () => {

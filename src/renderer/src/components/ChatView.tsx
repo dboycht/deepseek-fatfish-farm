@@ -68,11 +68,6 @@ function MessageRow({
               ))}
             </div>
           ) : null}
-          {msg.sticker ? (
-            <div style={{ marginBottom: msg.text ? 6 : 0 }}>
-              <Sticker name={msg.sticker} hue={hue} size={120} showLabel={false} />
-            </div>
-          ) : null}
           {msg.text ? (
             <RichText
               text={msg.text}
@@ -83,6 +78,11 @@ function MessageRow({
               onLocate={(id) => void s.locateMessage(id)}
               onZoom={onZoom}
             />
+          ) : null}
+          {msg.sticker ? (
+            <div style={{ marginTop: msg.text ? 8 : 0 }}>
+              <Sticker name={msg.sticker} hue={hue} size={120} showLabel={false} />
+            </div>
           ) : null}
           {!msg.text && !msg.sticker && !msg.err && !msg.imgs?.length ? (
             <span className="typing">

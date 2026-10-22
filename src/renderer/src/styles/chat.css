@@ -117,10 +117,19 @@
   font-size: 1em;
   line-height: 1.72;
   word-break: break-word;
-  white-space: pre-wrap;
+  /* 不要用 pre-wrap：RichText 输出的是 HTML，标签间换行会被当成空行 */
+  white-space: normal;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(20, 40, 70, 0.82), rgba(12, 24, 44, 0.78));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.bubble .rt {
+  white-space: normal;
+}
+
+.bubble .plain {
+  white-space: pre-wrap;
 }
 
 .msg.me .bubble {

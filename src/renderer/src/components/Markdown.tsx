@@ -36,16 +36,19 @@ const ALLOWED_TAGS = [
 
 export function htmlOf(md: string): string {
   const html = marked.parse(md) as string
-  return DOMPurify.sanitize(html, {
+  const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS,
     ALLOWED_ATTR: ['href', 'title', 'class', 'target', 'rel'],
     ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#)/i
   })
+  // 标签之间的换行在 pre-wrap 时代会变成空行；这里统一收紧
+  return clean.replace(/>\s+</g, '><').trim()
 }
 
 const CITE_RE = /<cite\s+id="?(M\d+)"?\s*\/?>/gi
 const CITE_PLACEHOLDER_RE = /\[\[CITE:(M\d+)\]\]/g
-const STICKER_RE = /\[\[fish:\s*([a-z]+)\s*\]\]/gi
+/** 兼容模型偶尔写成的单层方括号 [fish:shy] */
+const STICKER_RE = /\[{1,2}\s*fish:\s*([a-z]+)\s*\]{1,2}/gi
 
 export interface CitePopoverProps {
   anchor: string
