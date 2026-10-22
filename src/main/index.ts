@@ -317,7 +317,9 @@ async function runTurn(input: SendInput): Promise<void> {
 
     const msg = newMessage('a', clean, {
       id: assistantMsgId,
-      reason: cfg.ui.showReasoning && reason ? reason : undefined,
+      // 内心 OS 始终存下来（体积很小），是否显示由「外观」里的开关控制，
+      // 这样用户之后再打开开关也能看到历史回复的 OS。
+      reason: reason.trim() ? reason.slice(0, 4000) : undefined,
       cite: citeCardIds.length ? citeCardIds : undefined,
       sticker,
       tok: usage,
@@ -466,7 +468,7 @@ async function greet(fishId: string, chatId: string): Promise<void> {
     const msg = newMessage('a', directives.cleaned, {
       id: msgId,
       sticker: directives.sticker,
-      reason: cfg.ui.showReasoning && reason ? reason : undefined
+      reason: reason.trim() ? reason.slice(0, 4000) : undefined
     })
     await appendMessage(root, fishId, chatId, msg)
     stream({ kind: 'done', fishId, chatId, msgId, message: msg })
@@ -1024,11 +1026,19 @@ function registerIpc(): void {
          const first = ms[0];
          const b = document.querySelector('.msg .bubble');
          const rt = b ? b.querySelector('.rt') : null;
+         const det = document.querySelector('details.reason');
+         const inner = det ? det.querySelector('.inner') : null;
          return {
            count: ms.length,
            first: first ? { h: first.getBoundingClientRect().height, opacity: getComputedStyle(first).opacity } : null,
            bubble: b ? { h: b.getBoundingClientRect().height, ws: getComputedStyle(b).whiteSpace } : null,
-           rt: rt ? { h: rt.getBoundingClientRect().height, ps: rt.querySelectorAll('p').length } : null
+           rt: rt ? { h: rt.getBoundingClientRect().height, ps: rt.querySelectorAll('p').length } : null,
+           reason: det ? {
+             open: det.open,
+             h: det.getBoundingClientRect().height,
+             innerH: inner ? inner.getBoundingClientRect().height : null,
+             text: (inner?.textContent ?? '').slice(0, 60)
+           } : null
          };
        })()`
     )

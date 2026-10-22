@@ -376,16 +376,7 @@ export function SettingsModal(): ReactElement | null {
                   </div>
                 </div>
                 <div className="row">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={d.routes.text.reasoning}
-                      onChange={(e) =>
-                        patch('routes', { ...d.routes, text: { ...d.routes.text, reasoning: e.target.checked } })
-                      }
-                    />
-                    显示内心 OS（reasoning_content）
-                  </label>
+                  <span className="hint">内心 OS 的显示开关在「外观」页；这里控制路由参数。</span>
                   <span style={{ flex: 1 }} />
                   <button className="btn sm" disabled={testing !== null} onClick={() => void runTest('text')}>
                     {testing === 'text' ? '测试中…' : '测试对话接口'}

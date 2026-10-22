@@ -96,7 +96,14 @@ function MessageRow({
 
         {showReason ? (
           <details className="reason">
-            <summary>内心 OS（它自己嘀咕的）</summary>
+            <summary>
+              <span className="chev">▸</span>
+              <span>内心 OS</span>
+              <span className="reason-hint">（它自己嘀咕的 · 点开）</span>
+              <span className="reason-preview">
+                {(msg.reason ?? '').replace(/\s+/g, ' ').slice(0, 64)}
+              </span>
+            </summary>
             <div className="inner">{msg.reason}</div>
           </details>
         ) : null}

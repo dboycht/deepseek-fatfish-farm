@@ -745,6 +745,9 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       if (scene === 'stickers') {
         setTimeout(() => document.querySelector<HTMLElement>('[data-testid="sticker-toggle"]')?.click(), 700)
       }
+      if (scene === 'reason') {
+        setTimeout(() => document.querySelector<HTMLDetailsElement>('details.reason')?.setAttribute('open', ''), 600)
+      }
     })
     return off
   }, [])
