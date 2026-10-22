@@ -315,8 +315,22 @@ test('路由：provider 丢失时回退第一个，模型丢失时回退 provide
 test('贴纸 token：双层与模型偶发的单层方括号都能识别', () => {
   assert.equal(parseStickerToken('好耶 [[fish:joy]]'), 'joy')
   assert.equal(parseStickerToken('好耶 [fish:shy]'), 'shy')
+  assert.equal(parseStickerToken('贴纸写成中文 [贴纸:shy]'), 'shy')
+  assert.equal(parseStickerToken('全角与方头括号【表情：joy】'), 'joy')
   assert.equal(parseStickerToken('[fish:not-a-sticker]'), null)
   assert.equal(parseStickerToken('没有贴纸'), null)
+})
+
+test('贴纸指令：中文别名/全角冒号/需要前缀都能进需求', () => {
+  const known = new Set(['joy', 'shy'])
+  const d = extractStickerDirectives(
+    '好耶 [贴纸:shy] 还有 [表情：joy]；缺 [贴纸:委屈]；想要 [表情包:需要:害羞]',
+    known
+  )
+  assert.equal(d.sticker, 'shy')
+  assert.deepEqual(d.unknown, ['委屈'])
+  assert.deepEqual(d.needs, ['害羞'])
+  assert.ok(!/贴纸|表情|sticker|fish/i.test(d.cleaned))
 })
 
 test('贴纸指令：可用/缺失/未知分类，正文被清理', () => {

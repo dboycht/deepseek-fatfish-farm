@@ -43,18 +43,21 @@ export interface StickerDirectives {
   unknown: string[]
 }
 
-const DIRECTIVE_RE =
-  /\[{1,2}\s*sticker:\s*([a-z0-9:_\-\u3400-\u9fff]+)\s*\]{1,2}|\[{1,2}\s*fish:\s*([a-z0-9\-\u3400-\u9fff]+)\s*\]{1,2}/gi
+const DIRECTIVE_PREFIX = '(?:sticker|fish|贴纸|表情包|表情)'
+const DIRECTIVE_RE = new RegExp(
+  `[\\[【]{1,2}\\s*${DIRECTIVE_PREFIX}\\s*[:：]\\s*([a-z0-9:_\\-\\u3400-\\u9fff]+)\\s*[\\]】]{1,2}`,
+  'gi'
+)
 
 export function extractStickerDirectives(text: string, known: ReadonlySet<string>): StickerDirectives {
   let sticker: string | undefined
   const needs: string[] = []
   const unknown: string[] = []
-  const cleaned = text.replace(DIRECTIVE_RE, (_m, a: string | undefined, b: string | undefined) => {
-    const raw = String(a ?? b ?? '').toLowerCase()
+  const cleaned = text.replace(DIRECTIVE_RE, (_m, rawValue: string) => {
+    const raw = String(rawValue ?? '').toLowerCase()
     if (!raw) return ''
-    if (raw.startsWith('need:')) {
-      const key = normalizeWishKey(raw.slice(5))
+    if (raw.startsWith('need:') || raw.startsWith('需要:')) {
+      const key = normalizeWishKey(raw.replace(/^(need|需要):/, ''))
       if (key) needs.push(key)
       return ''
     }

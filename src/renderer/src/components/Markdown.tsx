@@ -47,8 +47,8 @@ export function htmlOf(md: string): string {
 
 const CITE_RE = /<cite\s+id="?(M\d+)"?\s*\/?>/gi
 const CITE_PLACEHOLDER_RE = /\[\[CITE:(M\d+)\]\]/g
-/** 兼容模型偶尔写成的单层方括号 [fish:shy] */
-const STICKER_RE = /\[{1,2}\s*fish:\s*([a-z]+)\s*\]{1,2}/gi
+/** 兼容中英文别名与单/双/【】括号 */
+const STICKER_RE = /[\[【]{1,2}\s*(?:sticker|fish|贴纸|表情包|表情)\s*[:：]\s*([a-z]+)\s*[\]】]{1,2}/gi
 
 export interface CitePopoverProps {
   anchor: string

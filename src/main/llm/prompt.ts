@@ -190,7 +190,7 @@ export function parseDrawToken(text: string): string | null {
 }
 
 export function parseStickerToken(text: string): string | null {
-  const m = text.match(/\[{1,2}\s*fish:\s*([a-z]+)\s*\]{1,2}/i)
+  const m = text.match(/[\[【]{1,2}\s*(?:sticker|fish|贴纸|表情包|表情)\s*[:：]\s*([a-z]+)\s*[\]】]{1,2}/i)
   if (!m) return null
   const name = m[1].toLowerCase()
   return (STICKERS as readonly string[]).includes(name) ? name : null
