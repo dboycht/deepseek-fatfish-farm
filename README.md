@@ -51,8 +51,12 @@
 
 ### 直接使用（安装包）
 
-从 [Releases](https://github.com/dboycht/deepseek-fatfish-farm/releases) 下载
-`deepseek-fatfish-farm-*-setup.exe`，安装后打开。
+```bash
+pnpm dist
+```
+
+构建完成后在 `release/` 里拿到 `deepseek-fatfish-farm-*-setup.exe`，双击安装。
+（当前版本尚未发布 Release；如需从 GitHub 下载，等作者打完 tag 后即可在 Releases 页看到。）
 
 > 当前版本只做了 Windows（x64）验证。macOS / Linux 的配置已就绪但未实测。
 
@@ -141,9 +145,10 @@ module.exports.activate = (api) => {
 }
 ```
 
-插件目录：内置 `resources/plugins`（开发时是仓库 `plugins/`），用户插件在
-`%APPDATA%/deepseek-fatfish-farm/plugins`。面板协议 `fatfish-plugin://<id>/<entry>` 做了
-路径穿越防护，iframe 带 sandbox。完整 API 与调试方法见 [docs/PLUGINS.md](docs/PLUGINS.md)。
+插件目录：内置 `resources/plugins`（开发时是仓库 `plugins/`），用户插件在配置目录下的
+`plugins/`（具体路径可在「设置 → 关于」里看到，点「打开插件目录」直达）。面板协议
+`fatfish-plugin://<id>/<entry>` 做了路径穿越防护，iframe 带 sandbox。完整 API 与调试方法见
+[docs/PLUGINS.md](docs/PLUGINS.md)。
 
 ---
 
