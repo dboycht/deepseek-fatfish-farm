@@ -638,6 +638,9 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
         const p = pluginsRef.current.find((x) => x.panel)
         if (p) setPanelPlugin(p)
       }
+      if (scene === 'send') {
+        setTimeout(() => void send('（排练模式自检）在吗？随便说句话听听'), 700)
+      }
     })
     return off
   }, [])

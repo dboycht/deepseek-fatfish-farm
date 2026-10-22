@@ -833,8 +833,25 @@ function registerIpc(): void {
   ipcMain.handle('shot:ready', async () => {
     if (!SHOT_PATH || !mainWindow) return false
     await new Promise((r) => setTimeout(r, 900))
-    if (process.env.FATFISH_SCENE === 'cite') {
-      // 截图不能靠人手点：这里直接在渲染端触发一次引用徽章的点击
+    const scene = process.env.FATFISH_SCENE
+
+    // 等聊天真正画出来（首次冷启动/打包后可能比 ready 慢半拍）
+    if (scene === '' || scene === 'send') {
+      for (let i = 0; i < 40; i++) {
+        const ready = await mainWindow.webContents.executeJavaScript(
+          `(() => {
+             const ms = document.querySelectorAll('.msg');
+             const last = document.querySelector('.msg:last-child .bubble');
+             return ms.length > 0 && (!last || (last.innerText || '').trim().length > 0);
+           })()`
+        )
+        if (ready) break
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (scene === 'send') await new Promise((r) => setTimeout(r, 1600))
+    }
+
+    if (scene === 'cite') {      // 截图不能靠人手点：这里直接在渲染端触发一次引用徽章的点击
       const hit = await mainWindow.webContents.executeJavaScript(
         `(async () => {
            const el = document.querySelector('.cite');
@@ -857,6 +874,18 @@ function registerIpc(): void {
       console.log('[shot] cite click =', JSON.stringify(hit))
       await new Promise((r) => setTimeout(r, 400))
     }
+    const dom = await mainWindow.webContents.executeJavaScript(
+      `(() => {
+         const ms = [...document.querySelectorAll('.msg')];
+         const first = ms[0];
+         return {
+           count: ms.length,
+           first: first ? { h: first.getBoundingClientRect().height, opacity: getComputedStyle(first).opacity } : null,
+           reduce: matchMedia('(prefers-reduced-motion: reduce)').matches
+         };
+       })()`
+    )
+    console.log('[shot] dom =', JSON.stringify(dom))
     const image = await mainWindow.webContents.capturePage()
     await fs.writeFile(SHOT_PATH, image.toPNG())
     setTimeout(() => app.quit(), 300)

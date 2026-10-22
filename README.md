@@ -40,6 +40,11 @@
 | --- | --- |
 | ![创建](docs/screenshots/create.jpg) | ![引导](docs/screenshots/onboarding.jpg) |
 
+聊天时它会在后台把对话压成记忆——截图里刚聊完，右下角就提示「记住了 2 件小事」，
+记忆卡片从 5 条变成 7 条（排练模式，不联网）：
+
+![聊天与自动记忆](docs/screenshots/send.jpg)
+
 ---
 
 ## 快速开始
