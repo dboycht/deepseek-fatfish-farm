@@ -4,9 +4,9 @@
  */
 import { createHash } from 'node:crypto'
 import { deflateSync, gzipSync } from 'node:zlib'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 /* ----------------------------- 极简 PNG 编码器 ----------------------------- */
 
@@ -370,4 +370,17 @@ writeFileSync(
 )
 
 const digest = createHash('sha1').update(base).digest('hex').slice(0, 8)
+
+// 把示例贴纸包也放进演示配置目录，方便截图里看到「用户贴纸包」
+try {
+  const sample = join(resolve(import.meta.dirname, '..'), 'examples', 'sticker-pack')
+  if (existsSync(sample)) {
+    const dest = join(userData, 'stickers', 'fatfish-sample-pack')
+    mkdirSync(join(userData, 'stickers'), { recursive: true })
+    cpSync(sample, dest, { recursive: true })
+  }
+} catch {
+  /* 示例包不存在不影响演示 */
+}
+
 console.log(JSON.stringify({ base, userData, pond, digest }))

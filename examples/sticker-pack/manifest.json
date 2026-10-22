@@ -1,0 +1,37 @@
+{
+  "id": "fatfish-sample-pack",
+  "name": "示例：大肥鱼补充表情",
+  "version": "1.0.0",
+  "author": "fatfish-farm",
+  "license": "CC-BY-NC-4.0",
+  "description": "三张示意表情，展示文件命名与 manifest 格式。用 GPT 生成自己的包时可以照这个结构。",
+  "items": [
+    {
+      "id": "sample-happy",
+      "label": "开心到冒泡",
+      "file": "sample-happy.png",
+      "tags": [
+        "开心",
+        "得意"
+      ]
+    },
+    {
+      "id": "sample-hungry",
+      "label": "干饭魂",
+      "file": "sample-hungry.png",
+      "tags": [
+        "饿",
+        "干饭"
+      ]
+    },
+    {
+      "id": "sample-sleepy",
+      "label": "困成海螺",
+      "file": "sample-sleepy.png",
+      "tags": [
+        "困",
+        "晚安"
+      ]
+    }
+  ]
+}

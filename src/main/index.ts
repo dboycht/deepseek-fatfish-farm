@@ -51,7 +51,20 @@ import {
   searchCards
 } from './store/memory'
 import { captionImage, chatCompletion, generateImage, testConnection } from './llm/provider'
-import { buildMessages, parseCiteAnchors, parseDrawToken, parseStickerToken } from './llm/prompt'
+import { buildMessages, parseCiteAnchors, parseDrawToken } from './llm/prompt'
+import { extractStickerDirectives } from '@shared/stickers'
+import {
+  clearStickerWishes,
+  ensureStickerDir,
+  exportStickerWishes,
+  importStickerPack,
+  listStickerState,
+  recordStickerWish,
+  registerStickerProtocol,
+  removeStickerPack,
+  resolveStickerFile,
+  stickersDir
+} from './stickers'
 import { mockReply } from './llm/mock'
 import { bundledPluginsDir, invokePlugin, listPlugins, reloadPlugins, setPluginEmitter, togglePlugin } from './plugins/loader'
 import { mediaUrl, registerMediaProtocol, registerPluginProtocol } from './plugins/protocol'
@@ -72,7 +85,8 @@ import type {
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'fatfish', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
-  { scheme: 'fatfish-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+  { scheme: 'fatfish-plugin', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: 'fatfish-sticker', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ])
 
 const SHOT_PATH = process.env.FATFISH_SHOT ?? ''
@@ -157,6 +171,14 @@ async function runTurn(input: SendInput): Promise<void> {
   const imageEp = await resolveImageEndpoint(cfg)
   const isMock = cfg.mode === 'mock' || !textEp.baseUrl || !textEp.model
 
+  // 可用贴纸：内置 + 用户包；同时收集自定义 id 给提示词
+  const stickerState = await listStickerState()
+  const knownStickerIds = new Set(stickerState.packs.flatMap((p) => p.items.map((i) => i.id)))
+  const customStickers = stickerState.packs
+    .filter((p) => !p.builtin)
+    .flatMap((p) => p.items.map((i) => ({ id: i.id, label: i.label })))
+    .slice(0, 40)
+
   const finishStats = async (patch: { exp: number; tokens: number; mood: number; hunger: number }): Promise<void> => {
     await patchStats(root, input.fishId, (p) => {
       p.stats.chats += 1
@@ -232,6 +254,7 @@ async function runTurn(input: SendInput): Promise<void> {
       hits,
       now: new Date(),
       visionEnabled: visionOn,
+      stickers: customStickers,
       captionOf,
       dataUrlOf: (mid) => dataUrls.get(mid),
       drawEnabled: !isMock && cfg.memory.allowDraw && Boolean(imageEp)
@@ -275,14 +298,18 @@ async function runTurn(input: SendInput): Promise<void> {
     if (!text.trim() && !sticker) text = '唔……我刚刚走神了，你再说一遍好不好？'
 
     // 4) 解析引用 / 贴纸 / 画图（引用锚点保留在正文里，渲染端把它变成可点击的卡片）
-    const anchors = [...new Set(parseCiteAnchors(text))]
+    const directives = extractStickerDirectives(text, knownStickerIds)
+    for (const key of [...directives.needs, ...directives.unknown]) {
+      void recordStickerWish(key, input.text)
+    }
+    const anchorText = directives.cleaned
+    const anchors = [...new Set(parseCiteAnchors(anchorText))]
     const citeCardIds = anchors
       .map((a) => hits.find((h) => h.anchor === a)?.card.id)
       .filter((v): v is string => Boolean(v))
-    const drawPrompt = !isMock && cfg.memory.allowDraw && imageEp ? parseDrawToken(text) : null
-    sticker = sticker ?? parseStickerToken(text) ?? undefined
-    const clean = text
-      .replace(/\[{1,2}\s*fish:\s*[a-z]+\s*\]{1,2}/gi, '')
+    const drawPrompt = !isMock && cfg.memory.allowDraw && imageEp ? parseDrawToken(anchorText) : null
+    sticker = sticker ?? directives.sticker
+    const clean = anchorText
       .replace(/\[{1,2}\s*draw:[\s\S]*?\]{1,2}/gi, '')
       .replace(/[ \t]+\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
@@ -429,10 +456,18 @@ async function greet(fishId: string, chatId: string): Promise<void> {
     reason = ''
     stream({ kind: 'error', fishId, chatId, msgId, error: (e as Error).message })
   }
-  const clean = text.replace(/\[\[fish:\s*[a-z]+\s*\]\]/gi, '').trim()
-  if (clean || text) {
-    const sticker = parseStickerToken(text) ?? undefined
-    const msg = newMessage('a', clean, { id: msgId, sticker, reason: cfg.ui.showReasoning && reason ? reason : undefined })
+  const stickersState = await listStickerState()
+  const knownStickerIds = new Set(stickersState.packs.flatMap((p) => p.items.map((i) => i.id)))
+  const directives = extractStickerDirectives(text, knownStickerIds)
+  for (const key of [...directives.needs, ...directives.unknown]) {
+    void recordStickerWish(key, '（开场白）')
+  }
+  if (directives.cleaned || text) {
+    const msg = newMessage('a', directives.cleaned, {
+      id: msgId,
+      sticker: directives.sticker,
+      reason: cfg.ui.showReasoning && reason ? reason : undefined
+    })
     await appendMessage(root, fishId, chatId, msg)
     stream({ kind: 'done', fishId, chatId, msgId, message: msg })
   }
@@ -825,6 +860,20 @@ function registerIpc(): void {
     return cap
   })
 
+  // ---- 贴纸包 / 缺表情 ----
+  ipcMain.handle('stickers:list', () => listStickerState())
+  ipcMain.handle('stickers:import', (_e, kind: 'zip' | 'folder') => importStickerPack(kind))
+  ipcMain.handle('stickers:remove', async (_e, packId: string) => {
+    await removeStickerPack(packId)
+    return listStickerState()
+  })
+  ipcMain.handle('stickers:clearWishes', async () => {
+    await clearStickerWishes()
+    return listStickerState()
+  })
+  ipcMain.handle('stickers:exportWishes', () => exportStickerWishes())
+  ipcMain.handle('stickers:openDir', async () => shell.openPath(await ensureStickerDir()))
+
   // ---- 记忆 ----
   ipcMain.handle('memory:list', async (_e, fishId: string) => {
     const root = await pondRoot()
@@ -1045,6 +1094,22 @@ async function runSelfTest(reportPath: string): Promise<void> {
     delete process.env[envRef]
     return { env: envDesc, store: { ...storeDesc, valueMatched: true } }
   })
+  await step('stickers: pack + wishes', async () => {
+    const sample = join(process.cwd(), 'examples', 'sticker-pack')
+    if (!(await pathExists(join(sample, 'manifest.json')))) throw new Error('示例贴纸包不存在')
+    const dest = join(stickersDir(), 'fatfish-sample-pack')
+    if (!(await pathExists(dest))) await fs.cp(sample, dest, { recursive: true })
+    const state = await listStickerState()
+    const pack = state.packs.find((p) => p.id === 'fatfish-sample-pack')
+    if (!pack || pack.items.length !== 3) throw new Error('示例贴纸包没有被识别')
+    const file = await resolveStickerFile('fatfish-sample-pack', 'sample-happy.png')
+    if (!file) throw new Error('贴纸协议路径解析失败')
+    await recordStickerWish('pout', 'selftest: 缺一个鼓嘴表情')
+    const wishes = (await listStickerState()).wishes
+    if (!wishes.some((w) => w.key === 'pout')) throw new Error('缺表情没有被记录')
+    await clearStickerWishes()
+    return { packs: state.packs.length, items: pack.items.length, file: file.replace(/\\/g, '/').split('/').slice(-2).join('/'), wishes: wishes.map((w) => w.key) }
+  })
   await step('create fish', async () => {
     const fish = await createFish(root, '测试肥鱼')
     fishId = fish.id
@@ -1119,6 +1184,7 @@ void app.whenReady().then(async () => {
     resolveFile((await loadConfig()).pondRoot, fishId, mediaId, variant)
   )
   registerPluginProtocol()
+  registerStickerProtocol()
   setPluginEmitter((pluginId, type, payload) => emit('ev:plugin', { pluginId, type, payload }))
   await reloadPlugins()
 

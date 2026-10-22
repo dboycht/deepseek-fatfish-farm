@@ -331,6 +331,55 @@ export interface RecallHit {
   anchor: string
 }
 
+/* ------------------------------------------------------------------ *
+ * 贴纸包（用户可以用 GPT 批量生成后导入）
+ * ------------------------------------------------------------------ */
+
+export interface StickerItem {
+  id: string
+  label: string
+  /** 相对贴纸包目录的文件名；内置贴纸为空（用代码绘制的表情表） */
+  file: string
+  tags?: string[]
+  /** 列表时由主进程填充 */
+  packId?: string
+}
+
+export interface StickerPack {
+  id: string
+  name: string
+  version: string
+  author?: string
+  license?: string
+  description?: string
+  builtin?: boolean
+  dir?: string
+  items: StickerItem[]
+}
+
+/** 模型想要、但当前没有的贴纸（缺表情统计） */
+export interface StickerWish {
+  key: string
+  count: number
+  firstAt: number
+  lastAt: number
+  samples: string[]
+}
+
+export interface StickerState {
+  packs: StickerPack[]
+  wishes: StickerWish[]
+  /** 用户贴纸包目录 */
+  dir: string
+}
+
+export interface StickerImportResult {
+  packId: string
+  name: string
+  items: number
+  warnings: string[]
+}
+
 export interface SendInput {
   fishId: string
   chatId: string

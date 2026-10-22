@@ -23,6 +23,8 @@ import type {
   MemoryStats,
   PluginInfo,
   ProviderView,
+  StickerImportResult,
+  StickerState,
   StreamEvent
 } from '@shared/types'
 
@@ -69,6 +71,7 @@ interface StoreShape {
   memStats: MemoryStats | null
   media: MediaMeta[]
   providers: ProviderView[]
+  stickerState: StickerState | null
   plugins: PluginInfo[]
   panelPlugin: PluginInfo | null
   settingsOpen: boolean
@@ -97,6 +100,12 @@ interface StoreShape {
   pinCard: (cardId: string, pin: boolean) => Promise<void>
   deleteCard: (cardId: string) => Promise<void>
   refreshMedia: () => Promise<void>
+  refreshStickers: () => Promise<void>
+  importStickers: (kind: 'zip' | 'folder') => Promise<StickerImportResult | null>
+  removeStickerPack: (packId: string) => Promise<void>
+  clearStickerWishes: () => Promise<void>
+  exportStickerWishes: () => Promise<void>
+  openStickerDir: () => Promise<void>
   exportFish: () => Promise<void>
   exportMemory: () => Promise<void>
   importBundle: () => Promise<void>
@@ -143,6 +152,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
   const [memStats, setMemStats] = useState<MemoryStats | null>(null)
   const [media, setMedia] = useState<MediaMeta[]>([])
   const [providers, setProviders] = useState<ProviderView[]>([])
+  const [stickerState, setStickerState] = useState<StickerState | null>(null)
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [panelPlugin, setPanelPlugin] = useState<PluginInfo | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -176,6 +186,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       setCfg(c)
       setInfo(i)
       setProviders(pv)
+      setStickerState(await api.stickers.list())
       const list = await api.fish.list()
       setFishList(list)
       if (list.length) await selectFishInternal(list[0].id)
@@ -202,6 +213,53 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
     const id = fishIdRef.current
     if (!id) return
     setMedia(await api.media.list(id))
+  }, [])
+
+  const refreshStickers = useCallback(async () => {
+    setStickerState(await api.stickers.list())
+  }, [])
+
+  const importStickers = useCallback(
+    async (kind: 'zip' | 'folder'): Promise<StickerImportResult | null> => {
+      try {
+        const res = await api.stickers.import(kind)
+        setStickerState(await api.stickers.list())
+        if (res) {
+          toast(
+            `导入「${res.name}」${res.items} 张` +
+              (res.warnings.length ? `（${res.warnings.length} 条提醒）` : ''),
+            'ok'
+          )
+        }
+        return res
+      } catch (e) {
+        toast((e as Error).message, 'err')
+        return null
+      }
+    },
+    [toast]
+  )
+
+  const removeStickerPack = useCallback(
+    async (packId: string) => {
+      setStickerState(await api.stickers.remove(packId))
+      toast(`已移除贴纸包 ${packId}`, 'ok')
+    },
+    [toast]
+  )
+
+  const clearStickerWishes = useCallback(async () => {
+    setStickerState(await api.stickers.clearWishes())
+    toast('缺表情记录已清空', 'ok')
+  }, [toast])
+
+  const exportStickerWishes = useCallback(async () => {
+    const res = await api.stickers.exportWishes()
+    if (res) toast(`需求清单已导出（${Math.round(res.bytes / 1024)} KB）`, 'ok')
+  }, [toast])
+
+  const openStickerDir = useCallback(async () => {
+    await api.stickers.openDir()
   }, [])
 
   const refreshChats = useCallback(async (id: string) => {
@@ -684,6 +742,9 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       if (scene === 'send') {
         setTimeout(() => void send('（排练模式自检）在吗？随便说句话听听'), 700)
       }
+      if (scene === 'stickers') {
+        setTimeout(() => document.querySelector<HTMLElement>('[data-testid="sticker-toggle"]')?.click(), 700)
+      }
     })
     return off
   }, [])
@@ -724,6 +785,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       memStats,
       media,
       providers,
+      stickerState,
       plugins,
       panelPlugin,
       settingsOpen,
@@ -752,6 +814,12 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       pinCard,
       deleteCard,
       refreshMedia,
+      refreshStickers,
+      importStickers,
+      removeStickerPack,
+      clearStickerWishes,
+      exportStickerWishes,
+      openStickerDir,
       exportFish,
       exportMemory,
       importBundle,
@@ -788,6 +856,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
     memStats,
     media,
     providers,
+    stickerState,
     plugins,
     panelPlugin,
     settingsOpen,

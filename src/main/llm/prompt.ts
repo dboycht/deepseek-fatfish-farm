@@ -1,4 +1,4 @@
-import { CHARACTER_BIBLE, STICKERS, moodWord, personaNotes } from '@shared/persona'
+import { CHARACTER_BIBLE, STICKERS, STICKER_LABEL, moodWord, personaNotes } from '@shared/persona'
 import type { AppConfig, ChatMessage, FishProfile, RecallHit } from '@shared/types'
 import type { ChatMsg, ContentPart } from './provider'
 
@@ -24,6 +24,8 @@ export interface PromptInput {
   hits: RecallHit[]
   now: Date
   visionEnabled: boolean
+  /** 用户贴纸包里的自定义表情（id + 中文标签），用于提示模型可用 id */
+  stickers?: { id: string; label: string }[]
   /** 历史里出现过的图片说明（mediaId -> caption/文件名） */
   captionOf: (mediaId: string) => string | undefined
   /** 当前消息图片的 dataURL（视觉启用时附带） */
@@ -53,10 +55,16 @@ function memorySection(hits: RecallHit[]): string {
   ].join('\n')
 }
 
-function stickerSection(): string {
+function stickerSection(custom?: { id: string; label: string }[]): string {
+  const builtin = STICKERS.map((s) => `${s}(${STICKER_LABEL[s]})`).join('、')
+  const extra = (custom ?? [])
+    .slice(0, 40)
+    .map((s) => `${s.id}(${s.label})`)
+    .join('、')
   return [
-    `【贴纸】你可以偶尔在句尾放一个贴纸标记，格式 [[fish:名字]]，一条消息最多一个。可选：${STICKERS.join(' / ')}。`,
-    '贴纸是可选的点缀：开心、干饭、犯困、得意、害羞、炸毛、哭哭、干活、贴贴、晕碳、屑屑。不要每句都放。'
+    `【贴纸】可用：${builtin}${extra ? `；扩展：${extra}` : ''}。`,
+    '在句尾放一个贴纸标记，格式 [[sticker:名字]]，一条消息最多一个。',
+    '如果没有合适的表情，可以写 [[sticker:need:英文短词]]，系统会记下来以后补；不要硬用不存在的名字。'
   ].join('\n')
 }
 
@@ -89,7 +97,7 @@ export function buildSystemPrompt(input: PromptInput): string {
   )
 
   parts.push(memorySection(hits))
-  parts.push(stickerSection())
+  parts.push(stickerSection(input.stickers))
 
   parts.push(
     [

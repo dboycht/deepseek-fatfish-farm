@@ -95,6 +95,14 @@ const api: FarmApi = {
     toggle: (pluginId: string, enabled: boolean) => ipcRenderer.invoke('plugins:toggle', pluginId, enabled),
     dir: (kind: 'bundled' | 'user' = 'user') => ipcRenderer.invoke('plugins:dir', kind)
   },
+  stickers: {
+    list: () => ipcRenderer.invoke('stickers:list'),
+    import: (kind: 'zip' | 'folder') => ipcRenderer.invoke('stickers:import', kind),
+    remove: (packId: string) => ipcRenderer.invoke('stickers:remove', packId),
+    clearWishes: () => ipcRenderer.invoke('stickers:clearWishes'),
+    exportWishes: () => ipcRenderer.invoke('stickers:exportWishes'),
+    openDir: () => ipcRenderer.invoke('stickers:openDir')
+  },
   stats: {
     pond: () => ipcRenderer.invoke('stats:pond')
   }

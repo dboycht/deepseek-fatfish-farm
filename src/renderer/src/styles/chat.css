@@ -598,7 +598,7 @@
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
-  padding: 8px;
+  padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(8, 16, 30, 0.9);
@@ -617,6 +617,77 @@
   border-color: var(--line-strong);
   background: rgba(40, 90, 160, 0.5);
   transform: translateY(-1px);
+}
+
+.sticker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(7, 14, 27, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.sticker-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.sticker-scroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.sticker-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.sticker-section-head .link {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10.5px;
+}
+
+.sticker-section-head .link:hover {
+  color: var(--coral);
+}
+
+.sticker-wishes {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.wish {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid rgba(255, 138, 118, 0.28);
+  background: rgba(110, 50, 40, 0.2);
+  color: var(--coral);
+  font-size: 10.5px;
 }
 
 .quick-actions {

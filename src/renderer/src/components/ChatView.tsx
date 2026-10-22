@@ -131,6 +131,7 @@ export function ChatView({ onZoom }: { onZoom: (src: string) => void }): ReactEl
 
   const hue = s.fish?.hue ?? 205
   const busy = Boolean(s.stream)
+  const wishes = s.stickerState?.wishes ?? []
 
   const submit = async (): Promise<void> => {
     const text = draft.trim()
@@ -227,19 +228,107 @@ export function ChatView({ onZoom }: { onZoom: (src: string) => void }): ReactEl
         ) : null}
 
         {showStickers ? (
-          <div className="sticker-picker">
-            {STICKERS.map((name) => (
-              <button
-                key={name}
-                title={name}
-                onClick={() => {
-                  setShowStickers(false)
-                  void s.send('', [], name)
-                }}
-              >
-                <Sticker name={name} hue={hue} size={56} showLabel={false} />
+          <div className="sticker-panel">
+            <div className="sticker-panel-head">
+              <strong>贴纸</strong>
+              <span className="hint">缺的表情会被记下来</span>
+              <span style={{ flex: 1 }} />
+              <button className="btn sm" onClick={() => void s.importStickers('zip')}>
+                导入 zip
               </button>
-            ))}
+              <button className="btn sm" onClick={() => void s.importStickers('folder')}>
+                导入文件夹
+              </button>
+              <button className="btn sm ghost" onClick={() => void s.openStickerDir()}>
+                打开目录
+              </button>
+              <button className="btn sm ghost" onClick={() => setShowStickers(false)}>
+                收起
+              </button>
+            </div>
+
+            <div className="sticker-scroll">
+              <div className="sticker-section-head">内置</div>
+              <div className="sticker-picker">
+                {STICKERS.map((name) => (
+                  <button
+                    key={name}
+                    title={name}
+                    onClick={() => {
+                      setShowStickers(false)
+                      void s.send('', [], name)
+                    }}
+                  >
+                    <Sticker name={name} hue={hue} size={56} showLabel={false} />
+                  </button>
+                ))}
+              </div>
+
+              {(s.stickerState?.packs ?? [])
+                .filter((p) => !p.builtin)
+                .map((pack) => (
+                  <div key={pack.id}>
+                    <div className="sticker-section-head">
+                      <span>{pack.name}</span>
+                      <span className="tag">{pack.items.length}</span>
+                      <button
+                        className="link"
+                        onClick={() => {
+                          if (window.confirm(`删除贴纸包「${pack.name}」？`)) void s.removeStickerPack(pack.id)
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                    <div className="sticker-picker">
+                      {pack.items.map((it) => (
+                        <button
+                          key={it.id}
+                          title={it.label}
+                          onClick={() => {
+                            setShowStickers(false)
+                            void s.send('', [], it.id)
+                          }}
+                        >
+                          <Sticker name={it.id} hue={hue} size={56} showLabel={false} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+              {!(s.stickerState?.packs ?? []).some((p) => !p.builtin) ? (
+                <div className="hint" style={{ padding: '4px 2px' }}>
+                  还没有导入过贴纸包。可以用 GPT 批量画好，再「导入 zip / 文件夹」；
+                  缺的表情会自动记录，导出的需求清单里直接带好了给 GPT 的提示词。
+                </div>
+              ) : null}
+            </div>
+
+            <div className="sticker-wishes">
+              <div>
+                <strong>缺少的表情</strong>{' '}
+                {!wishes.length ? (
+                  <span className="hint">还没有记录</span>
+                ) : (
+                  wishes.slice(0, 10).map((w) => (
+                    <span className="wish" key={w.key} title={w.samples[0] ?? w.key}>
+                      {w.key} ×{w.count}
+                    </span>
+                  ))
+                )}
+              </div>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <button className="btn sm" onClick={() => void s.exportStickerWishes()}>
+                  导出需求清单（含 GPT 提示词）
+                </button>
+                {wishes.length ? (
+                  <button className="btn sm ghost" onClick={() => void s.clearStickerWishes()}>
+                    清空记录
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -275,7 +364,7 @@ export function ChatView({ onZoom }: { onZoom: (src: string) => void }): ReactEl
             <button className="tool" title="发图片" onClick={() => void pick()}>
               🖼
             </button>
-            <button className="tool" title="发贴纸" onClick={() => setShowStickers((v) => !v)}>
+            <button className="tool" title="发贴纸" data-testid="sticker-toggle" onClick={() => setShowStickers((v) => !v)}>
               🐟
             </button>
             {busy ? (

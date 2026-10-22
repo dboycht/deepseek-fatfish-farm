@@ -19,6 +19,8 @@
   每张卡保留来源消息与图片 id，聊天里可以 `<cite>` 引用并「回到原话」。
 - **图文并茂**：支持发图 / 拖图 / 粘贴图；可接多模态模型做视觉描述；
   可接生图接口，让它画一张给你；内置 12 种会动的表情贴纸。
+- **贴纸可扩展**：不够用就让模型写 `[[sticker:need:委屈]]`，缺的表情会被统计；
+  一键导出带 GPT 提示词的需求清单，画好 zip 导入即可。示例包在 `examples/sticker-pack/`。
 - **每只鱼都独一无二**：名字、体色、六维性格（贪吃 / 黏人 / 傲娇 / 调皮 / 摸鱼 / 犯困）
   由种子决定，口头禅、最爱的下饭菜、小怪癖也各不相同；性格可在设置里继续调教。
 - **像在养东西**：会饿、会困、心情会变；喂白米饭、回味记忆、升级成长；
@@ -148,6 +150,23 @@ routes:
 
 ![连接与密钥设置](docs/screenshots/settings.jpg)
 
+## 贴纸包与「缺表情」
+
+内置只有 12 个基础表情；不够时，模型可以写 `[[sticker:need:委屈]]`，软件会把缺的表情
+记下来（次数 + 上下文）。点「聊天输入框 → 🐟 → 导出需求清单」，会生成一份 Markdown，
+里面已经带好：
+
+- 缺失表情列表与例句；
+- 给 GPT 的批量生成提示词（角色设定、画风、尺寸、透明背景、禁止事项）；
+- 可直接使用的 `manifest.json` 模板与目录结构。
+
+GPT 画完打包成 zip，回到「🐟 → 导入 zip」即可；之后模型就能用 `[[sticker:<id>]]` 调新表情。
+
+- 直接照抄的示例包：[`examples/sticker-pack/`](examples/sticker-pack/)
+- 完整规范与校验规则：[docs/STICKER_PACK.md](docs/STICKER_PACK.md)
+
+![贴纸包与缺表情](docs/screenshots/stickers.jpg)
+
 ## 插件化
 
 内置示例插件「稻田日记」展示了两种扩展方式：命令 + 面板。
@@ -189,17 +208,20 @@ module.exports.activate = (api) => {
 | 渲染 | marked + DOMPurify | 先清洗再加引用徽章，避免 XSS |
 | 存储 | JSON + gzip（数据）；YAML（配置/密钥） | 无数据库、无原生依赖，便于备份/迁移 |
 | 配置 | `config.yaml` + `.credentials.yaml` | 与 DeepSeek Harness 同构：引用名、环境变量回落、多 provider |
-| 安全 | contextIsolation + custom protocol | 渲染进程无 Node 权限；图片走 `fatfish://` |
+| 安全 | contextIsolation + custom protocol | 渲染进程无 Node 权限；图片/贴纸走只读协议 |
+| 贴纸 | 内置表情表 + 用户贴纸包 | zip/文件夹导入、缺表情统计、GPT 需求清单 |
 | 打包 | electron-builder 26 | NSIS 安装包 |
 
 ```
 src/
-├── main/           主进程：窗口、IPC、数据层、LLM、插件、导入导出
+├── main/           主进程：窗口、IPC、数据层、LLM、插件、贴纸、导入导出
 ├── preload/        contextBridge 暴露 window.farm
 ├── renderer/       React 界面
-└── shared/         类型、人格内核、检索纯函数（可单测）
+└── shared/         类型、人格内核、检索/贴纸纯函数（可单测）
 plugins/rice-diary/ 内置示例插件
+examples/sticker-pack/ 可直接导入的示例贴纸包 + GPT 提示词
 resources/art/      角色素材 + 原始许可（代码里另有一份供 Vite 打包）
+docs/               配置、记忆、插件、贴纸包文档与实机截图
 ```
 
 ---

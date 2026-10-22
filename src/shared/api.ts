@@ -18,6 +18,8 @@ import type {
   ProviderView,
   RecallHit,
   SendInput,
+  StickerImportResult,
+  StickerState,
   StreamEvent
 } from './types'
 
@@ -121,6 +123,14 @@ export interface FarmApi {
     invoke(pluginId: string, commandId: string, payload?: unknown): Promise<unknown>
     toggle(pluginId: string, enabled: boolean): Promise<PluginInfo[]>
     dir(kind?: 'bundled' | 'user'): Promise<string>
+  }
+  stickers: {
+    list(): Promise<StickerState>
+    import(kind: 'zip' | 'folder'): Promise<StickerImportResult | null>
+    remove(packId: string): Promise<StickerState>
+    clearWishes(): Promise<StickerState>
+    exportWishes(): Promise<{ path: string; bytes: number } | null>
+    openDir(): Promise<string>
   }
   stats: {
     pond(): Promise<{ bytes: number; root: string }>

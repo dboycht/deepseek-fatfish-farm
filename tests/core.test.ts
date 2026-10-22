@@ -6,6 +6,12 @@ import { join } from 'node:path'
 import { scoreCards, tokenize } from '../src/shared/recall'
 import { flavorFromSeed, levelFromExp, moodWord, personaFromSeed } from '../src/shared/persona'
 import { buildMessages, parseStickerToken } from '../src/main/llm/prompt'
+import {
+  extractStickerDirectives,
+  normalizeWishKey,
+  stickerSrc,
+  validateStickerManifest
+} from '../src/shared/stickers'
 import type { ChatMessage, FishProfile } from '../src/shared/types'
 import {
   defaultConfig,
@@ -311,6 +317,57 @@ test('贴纸 token：双层与模型偶发的单层方括号都能识别', () =>
   assert.equal(parseStickerToken('好耶 [fish:shy]'), 'shy')
   assert.equal(parseStickerToken('[fish:not-a-sticker]'), null)
   assert.equal(parseStickerToken('没有贴纸'), null)
+})
+
+test('贴纸指令：可用/缺失/未知分类，正文被清理', () => {
+  const known = new Set(['joy', 'hungry'])
+  const d = extractStickerDirectives(
+    '好耶 [[sticker:joy]] 和 [fish:hungry] 还有 [[sticker:need:pout]] 和 [[sticker:wtf]]',
+    known
+  )
+  assert.equal(d.sticker, 'joy')
+  assert.deepEqual(d.needs, ['pout'])
+  assert.deepEqual(d.unknown, ['wtf'])
+  assert.ok(!/sticker|fish:/i.test(d.cleaned))
+  assert.equal(extractStickerDirectives('只有 [sticker:need:委屈]', known).needs[0], '委屈')
+})
+
+test('贴纸需求 key 会被规范化', () => {
+  assert.equal(normalizeWishKey('  Pout!!  '), 'pout')
+  assert.equal(normalizeWishKey('委屈到变形'), '委屈到变形')
+  assert.equal(normalizeWishKey('   '), '')
+})
+
+test('贴纸 manifest：合法包通过，冲突/越界/坏 id 被拒', () => {
+  const good = validateStickerManifest(
+    {
+      id: 'my-pack',
+      name: '我的贴纸',
+      items: [{ id: 'pout', label: '鼓嘴', file: 'pout.png' }]
+    },
+    new Set(['joy'])
+  )
+  assert.equal(good.ok, true)
+  assert.equal(good.manifest?.items[0].id, 'pout')
+
+  const bad = validateStickerManifest(
+    {
+      id: 'my-pack',
+      name: '坏包',
+      items: [{ id: 'joy', label: '冲突', file: '../pout.png' }]
+    },
+    new Set(['joy'])
+  )
+  assert.equal(bad.ok, false)
+  assert.ok(bad.errors.some((e) => e.includes('冲突')))
+  assert.ok(bad.errors.some((e) => e.includes('..')))
+
+  const noItems = validateStickerManifest({ id: 'x-pack', name: '空', items: [] }, new Set())
+  assert.equal(noItems.ok, false)
+})
+
+test('贴纸 URL 会做编码', () => {
+  assert.equal(stickerSrc('my-pack', 'a b/萌.png'), 'fatfish-sticker://my-pack/a%20b/%E8%90%8C.png')
 })
 
 test('提示词：当前用户消息不会在历史里出现两次', () => {
