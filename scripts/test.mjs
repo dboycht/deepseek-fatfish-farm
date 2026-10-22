@@ -21,6 +21,9 @@ await build({
   outfile: out,
   // yaml 是 CJS 且内部有 require('process')，打成 ESM 会炸；交给 Node 原生解析
   external: ['yaml'],
+  alias: {
+    '@shared': join(root, 'src', 'shared')
+  },
   logLevel: 'warning'
 })
 

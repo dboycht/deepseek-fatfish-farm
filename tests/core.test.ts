@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scoreCards, tokenize } from '../src/shared/recall'
 import { flavorFromSeed, levelFromExp, moodWord, personaFromSeed } from '../src/shared/persona'
+import { buildMessages } from '../src/main/llm/prompt'
+import type { ChatMessage, FishProfile } from '../src/shared/types'
 import {
   defaultConfig,
   migrateV1,
@@ -302,4 +304,46 @@ test('路由：provider 丢失时回退第一个，模型丢失时回退 provide
   assert.equal(providerForRoute(cfg, 'text')?.id, 'a')
   cfg.routes.text.model = 'a-2'
   assert.equal(modelForRoute(cfg, 'text'), 'a-2')
+})
+
+test('提示词：当前用户消息不会在历史里出现两次', () => {
+  const profile: FishProfile = {
+    v: 1,
+    id: 'fish-1',
+    name: '小肥',
+    tagline: '测试鱼',
+    created: 0,
+    updated: 0,
+    hue: 205,
+    seed: 1,
+    flavor: { phrase: '嚼嚼嚼', food: '白米饭', quirk: '数气泡', nick: '本鱼' },
+    persona: { appetite: 60, clingy: 50, tsundere: 50, mischief: 50, laziness: 50, sleepy: 50 },
+    stats: { mood: 70, hunger: 30, tokens: 0, meals: 0, chats: 0, memories: 0, level: 1, exp: 0, lastSeen: 0 }
+  }
+  const history: ChatMessage[] = [
+    { id: 'u0', role: 'u', t: 1, text: '之前的话' },
+    { id: 'a0', role: 'a', t: 2, text: '之前的回复' },
+    // 模拟 bug 场景：当前用户消息已经落盘，又在 currentText 里传入一次
+    { id: 'u1', role: 'u', t: 3, text: '现在好像还没什么，你是谁' }
+  ]
+  const out = buildMessages({
+    profile,
+    config: defaultConfig('/pond'),
+    history,
+    currentText: '现在好像还没什么，你是谁',
+    currentUserMsgId: 'u1',
+    currentImages: [],
+    hits: [],
+    now: new Date('2026-10-22T12:00:00Z'),
+    visionEnabled: false,
+    captionOf: () => undefined,
+    drawEnabled: false
+  })
+  const userTexts = out
+    .filter((m) => m.role === 'user')
+    .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)))
+    .join('\n')
+  const occurrences = userTexts.split('现在好像还没什么，你是谁').length - 1
+  assert.equal(occurrences, 1, '当前用户消息只能出现一次')
+  assert.ok(out.some((m) => m.role === 'assistant' && String(m.content).includes('之前的回复')))
 })

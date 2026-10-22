@@ -216,12 +216,18 @@ async function runTurn(input: SendInput): Promise<void> {
         if (url) dataUrls.set(mid, url)
       }
     }
-    const history = (await readChat(root, input.fishId, chatId))?.msgs.filter((m) => m.id !== assistantMsgId) ?? []
+    // 注意：用户消息在上一步已经落盘，历史里必须把它排除，
+    // 否则 buildMessages 会把「当前这句话」再追加一次，模型会以为用户复读。
+    const history =
+      (await readChat(root, input.fishId, chatId))?.msgs.filter(
+        (m) => m.id !== assistantMsgId && m.id !== userMsgId
+      ) ?? []
     const messages = buildMessages({
       profile,
       config: cfg,
       history,
       currentText: input.text,
+      currentUserMsgId: userMsgId,
       currentImages: mediaIds.map((mid) => ({ id: mid, caption: captionOf(mid) })),
       hits,
       now: new Date(),

@@ -18,6 +18,8 @@ export interface PromptInput {
   config: AppConfig
   history: ChatMessage[]
   currentText: string
+  /** 当前用户消息的 id：历史里如果已经包含它，必须剔除，避免同一句话出现两次 */
+  currentUserMsgId?: string
   currentImages: PromptImage[]
   hits: RecallHit[]
   now: Date
@@ -115,7 +117,10 @@ export function buildMessages(input: PromptInput): ChatMsg[] {
   const { history, currentText, currentImages, profile, config } = input
   const out: ChatMsg[] = [{ role: 'system', content: buildSystemPrompt(input) }]
 
-  const keep = history.slice(-Math.max(6, Math.min(24, history.length)))
+  const prior = input.currentUserMsgId
+    ? history.filter((m) => m.id !== input.currentUserMsgId)
+    : history
+  const keep = prior.slice(-Math.max(6, Math.min(24, prior.length)))
   const imageBudget = 4
   let usedImages = 0
 
