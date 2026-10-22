@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>稻田日记</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --line: rgba(120, 190, 255, 0.18);
+        --text: #e9f4ff;
+        --dim: #9fb8d4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 18px;
+        font-family: 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+        color: var(--text);
+        background: radial-gradient(600px 300px at 20% 0%, rgba(60, 150, 255, 0.18), transparent 70%), #06101d;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: var(--dim);
+        font-size: 11.5px;
+        margin-bottom: 14px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 13px;
+        background: rgba(14, 28, 50, 0.6);
+        margin-bottom: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 7px 0;
+      }
+      .row .k {
+        width: 66px;
+        color: var(--dim);
+        font-size: 11.5px;
+      }
+      .bar {
+        flex: 1;
+        height: 7px;
+        border-radius: 99px;
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, #3b7dfd, #5ad2ff);
+        transition: width 0.4s ease;
+      }
+      .num {
+        width: 56px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: rgba(30, 60, 105, 0.6);
+        color: var(--text);
+        border-radius: 9px;
+        padding: 7px 11px;
+        font-size: 12.5px;
+        cursor: pointer;
+        margin-right: 8px;
+      }
+      button:hover {
+        background: rgba(46, 96, 172, 0.7);
+      }
+      pre {
+        margin: 10px 0 0;
+        padding: 10px 11px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: rgba(5, 12, 22, 0.8);
+        color: #bfe1ff;
+        font-size: 12px;
+        white-space: pre-wrap;
+        min-height: 42px;
+      }
+      .rice {
+        font-size: 15px;
+        letter-spacing: 2px;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🌾 稻田日记</h1>
+    <div class="sub">这是内置示例插件：面板用 HTML 写，逻辑用 CommonJS 的 activate(api) 写。</div>
+
+    <div class="card" id="card">
+      <div class="row"><span class="k">肥鱼</span><b id="name">（等待数据…）</b></div>
+      <div class="row"><span class="k">累计 token</span><span class="bar"><i id="tok" style="width: 0%"></i></span><span class="num" id="tokn">0</span></div>
+      <div class="row"><span class="k">心情</span><span class="bar"><i id="mood" style="width: 0%"></i></span><span class="num" id="moodn">0</span></div>
+      <div class="row"><span class="k">饿度</span><span class="bar"><i id="hung" style="width: 0%"></i></span><span class="num" id="hungn">0</span></div>
+      <div class="row"><span class="k">吃过</span><span class="rice" id="rice">—</span></div>
+    </div>
+
+    <div class="card">
+      <button id="bonus">偷偷加餐</button>
+      <button id="sample">抽一条记忆</button>
+      <button id="report">报个数</button>
+      <pre id="log">（命令输出会显示在这里）</pre>
+    </div>
+
+    <script>
+      let ctx = null
+      let seq = 0
+      const pending = new Map()
+
+      function invoke(command, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++seq
+          pending.set(id, { resolve, reject })
+          parent.postMessage({ type: 'farm:invoke', id, command, payload }, '*')
+        })
+      }
+
+      function log(text) {
+        document.getElementById('log').textContent = text
+      }
+
+      function render() {
+        if (!ctx) return
+        const s = ctx.stats || {}
+        document.getElementById('name').textContent = ctx.fishName || '（未选择）'
+        const tok = s.tokens || 0
+        document.getElementById('tok').style.width = Math.min(100, (tok / 5000) * 100) + '%'
+        document.getElementById('tokn').textContent = tok
+        document.getElementById('mood').style.width = (s.mood || 0) + '%'
+        document.getElementById('moodn').textContent = Math.round(s.mood || 0)
+        document.getElementById('hung').style.width = (s.hunger || 0) + '%'
+        document.getElementById('hungn').textContent = Math.round(s.hunger || 0)
+        document.getElementById('rice').textContent = '🍚'.repeat(Math.min(20, s.meals || 0)) || '还没吃过'
+      }
+
+      window.addEventListener('message', (e) => {
+        const d = e.data
+        if (!d || typeof d !== 'object') return
+        if (d.type === 'farm:init') {
+          ctx = d.context
+          render()
+        }
+        if (d.type === 'farm:result') {
+          const p = pending.get(d.id)
+          if (!p) return
+          pending.delete(d.id)
+          if (d.ok) p.resolve(d.result)
+          else p.reject(new Error(d.error))
+        }
+      })
+
+      document.getElementById('bonus').onclick = async () => {
+        try {
+          log(await invoke('bonus', { fishId: ctx && ctx.fishId }))
+          window.postMessage({ type: 'farm:toast', text: '插件给它加了一餐 🍚' }, '*')
+        } catch (err) {
+          log('出错：' + err.message)
+        }
+      }
+      document.getElementById('sample').onclick = async () => {
+        try {
+          log(await invoke('memory-sample', { fishId: ctx && ctx.fishId }))
+        } catch (err) {
+          log('出错：' + err.message)
+        }
+      }
+      document.getElementById('report').onclick = async () => {
+        try {
+          log(await invoke('report', { fishId: ctx && ctx.fishId }))
+        } catch (err) {
+          log('出错：' + err.message)
+        }
+      }
+    </script>
+  </body>
+</html>

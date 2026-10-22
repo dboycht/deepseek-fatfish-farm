@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+out/
+dist/
+release/
+*.log
+.cache/
+.vite/
+.tmp/
+build/_make-icon.cjs
+
+# 本地开发文档（按约定不同步到 GitHub）
+DEVELOPMENT.md
+ERROR.md
+docs/local/
+
+# 运行时数据 / 鱼塘数据（绝不入库）
+data/
+pond/
+*.fatfish
+*.fatmem

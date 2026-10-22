@@ -1,0 +1,38 @@
+{
+  "name": "deepseek-fatfish-farm",
+  "version": "1.0.1",
+  "private": true,
+  "description": "DeepSeek 肥鱼养殖场 —— 在自己的电脑鱼塘里养一只蓝色大肥鱼",
+  "author": "dboycht",
+  "license": "MIT",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "build": "npm run typecheck && electron-vite build",
+    "dist": "npm run build && electron-builder --win --config electron-builder.yml",
+    "test": "node scripts/test.mjs",
+    "selftest": "npm run build && node scripts/selftest.mjs",
+    "shot": "npm run build && node scripts/screenshot.mjs"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^24.9.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}

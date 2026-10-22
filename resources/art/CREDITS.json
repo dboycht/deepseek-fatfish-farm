@@ -1,0 +1,29 @@
+{
+  "source": "https://github.com/YunYueSama/codex-deepseek-pet",
+  "commit": "7661c8b304c5400701f91da01b1a643a207331de",
+  "license": "大肥鱼项目署名许可 1.0",
+  "licenseUrl": "https://github.com/YunYueSama/codex-deepseek-pet/blob/main/LICENSE",
+  "author": "YunYueSama",
+  "files": [
+    {
+      "name": "portrait.png",
+      "sourcePath": "assets/whale/portrait.png",
+      "bytes": 769600
+    },
+    {
+      "name": "idle-front.png",
+      "sourcePath": "assets/whale/idle-front.png",
+      "bytes": 1516887
+    },
+    {
+      "name": "expressions.png",
+      "sourcePath": "assets/whale/expressions.png",
+      "bytes": 3905134
+    },
+    {
+      "name": "actions.png",
+      "sourcePath": "assets/whale/actions.png",
+      "bytes": 3898755
+    }
+  ]
+}

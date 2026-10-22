@@ -1,0 +1,10 @@
+{
+  "id": "rice-diary",
+  "name": "稻田日记",
+  "version": "1.0.0",
+  "description": "内置示例插件：统计这只肥鱼吃了多少白米饭，提供「偷偷加餐」「抽一条记忆」两个命令，并带一个面板。",
+  "author": "deepseek-fatfish-farm",
+  "main": "main.js",
+  "panel": { "title": "稻田日记", "entry": "panel.html", "width": 520 },
+  "permissions": ["read:fish", "write:stats", "read:memory"]
+}
