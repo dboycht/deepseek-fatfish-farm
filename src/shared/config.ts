@@ -156,7 +156,8 @@ function normalizeRoutes(raw: unknown, providers: ProviderProfile[]): RoutesConf
   const vision: VisionRoute = {
     enabled: bool(v.enabled, false),
     providerId: vProvider.id,
-    model: str(v.model) || vProvider.models[0] || ''
+    // 视觉/生图不自动回退到对话模型：留空就是没选，避免误用 chat 模型
+    model: str(v.model)
   }
   const image: ImageRoute = {
     enabled: bool(i.enabled, false),
@@ -345,7 +346,7 @@ export function migrateV1(raw: LegacyV1Config, keys: LegacySecrets, fallbackPond
       vision: {
         enabled: bool(p.vision?.enabled, false),
         providerId: visionProviderId,
-        model: visionModel || providers.find((x) => x.id === visionProviderId)?.models[0] || ''
+        model: visionModel
       },
       image: {
         enabled: bool(p.image?.enabled, false),

@@ -31,7 +31,7 @@ export function defaultPondRoot(): string {
 const CONFIG_HEADER = `# DeepSeek 肥鱼养殖场 · 配置
 # 密钥不在这里：providers[].apiKeyEnv 只是引用名，
 # 值在同目录 .credentials.yaml 的 refs 下（也可用同名环境变量）。
-# 直接改这个文件也可以，保存后重启生效。`
+# 直接改这个文件也可以，保存后下一次请求生效。`
 
 let cache: { cfg: AppConfig; mtime: number } | null = null
 
