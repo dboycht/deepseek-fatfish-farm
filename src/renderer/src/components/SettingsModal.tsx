@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { AppConfig, FishPersona } from '@shared/types'
+import type { AppConfig, FishPersona, ProviderProfile } from '@shared/types'
 import { useStore } from '../state/store'
 import { ArtPortrait } from './ArtAvatar'
 
@@ -14,14 +14,18 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'about', label: '关于' }
 ]
 
+function sourceLabel(source: string, encrypted?: boolean): string {
+  if (source === 'store') return encrypted ? '已保存 · DPAPI 加密' : '已保存 · 明文'
+  if (source === 'env') return '来自环境变量'
+  return '未配置'
+}
+
 export function SettingsModal(): ReactElement | null {
   const s = useStore()
   const cfg = s.cfg
   const [tab, setTab] = useState<Tab>('api')
   const [draft, setDraft] = useState<AppConfig | null>(cfg)
-  const [keyText, setKeyText] = useState('')
-  const [keyVision, setKeyVision] = useState('')
-  const [keyImage, setKeyImage] = useState('')
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({})
   const [testing, setTesting] = useState<string | null>(null)
   const [encAvail, setEncAvail] = useState(true)
   const [pondBytes, setPondBytes] = useState<number | null>(null)
@@ -34,45 +38,85 @@ export function SettingsModal(): ReactElement | null {
     if (!s.settingsOpen) return
     void window.farm.app.encryption().then(setEncAvail)
     void window.farm.stats.pond().then((r) => setPondBytes(r.bytes))
-    setKeyText('')
-    setKeyVision('')
-    setKeyImage('')
+    setKeyDrafts({})
   }, [s.settingsOpen])
 
   if (!s.settingsOpen || !draft) return null
   const d = draft
+  const providers = s.providers
 
   const patch = <K extends keyof AppConfig>(key: K, value: AppConfig[K]): void => {
     setDraft({ ...d, [key]: value })
   }
 
-  const save = async (): Promise<void> => {
-    await s.saveConfig(d)
-    if (keyText || keyVision || keyImage) {
-      await s.saveSecrets({
-        ...(keyText ? { text: keyText } : {}),
-        ...(keyVision ? { vision: keyVision } : {}),
-        ...(keyImage ? { image: keyImage } : {})
-      })
-      setKeyText('')
-      setKeyVision('')
-      setKeyImage('')
+  const patchProvider = (id: string, patch2: Partial<ProviderProfile>): void => {
+    setDraft({ ...d, providers: d.providers.map((p) => (p.id === id ? { ...p, ...patch2 } : p)) })
+  }
+
+  const addProvider = (): void => {
+    const n = d.providers.length + 1
+    const provider: ProviderProfile = {
+      id: `provider-${Math.random().toString(36).slice(2, 6)}`,
+      name: `新接口 ${n}`,
+      baseUrl: '',
+      apiKeyEnv: `PROVIDER_${n}_API_KEY`,
+      models: []
     }
-    s.toast('设置已保存', 'ok')
+    setDraft({ ...d, providers: [...d.providers, provider] })
+  }
+
+  const removeProvider = (id: string): void => {
+    if (d.providers.length <= 1) {
+      s.toast('至少保留一个 provider', 'err')
+      return
+    }
+    const rest = d.providers.filter((p) => p.id !== id)
+    const fallback = rest[0].id
+    const fix = <T extends { providerId: string }>(route: T): T =>
+      route.providerId === id ? { ...route, providerId: fallback } : route
+    setDraft({
+      ...d,
+      providers: rest,
+      routes: {
+        text: fix(d.routes.text),
+        vision: fix(d.routes.vision),
+        image: fix(d.routes.image)
+      }
+    })
+  }
+
+  const saveDraft = async (): Promise<AppConfig> => {
+    await s.saveConfig(d)
+    return d
+  }
+
+  const saveKey = async (ref: string): Promise<void> => {
+    const value = (keyDrafts[ref] ?? '').trim()
+    if (!value) return
+    try {
+      await s.setCredential(ref, value)
+      setKeyDrafts((prev) => ({ ...prev, [ref]: '' }))
+    } catch {
+      /* store 已经弹过错误提示 */
+    }
   }
 
   const runTest = async (target: 'text' | 'vision' | 'image'): Promise<void> => {
     setTesting(target)
     try {
-      await s.saveConfig(d)
-      if (keyText || keyVision || keyImage) {
-        await s.saveSecrets({
-          ...(keyText ? { text: keyText } : {}),
-          ...(keyVision ? { vision: keyVision } : {}),
-          ...(keyImage ? { image: keyImage } : {})
-        })
-      }
+      await saveDraft()
       const res = await s.testConnection(target)
+      s.toast(res.ok ? `✅ ${res.detail}` : `❌ ${res.detail}`, res.ok ? 'ok' : 'err')
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const runProviderTest = async (providerId: string): Promise<void> => {
+    setTesting(`provider:${providerId}`)
+    try {
+      await saveDraft()
+      const res = await s.testProvider(providerId)
       s.toast(res.ok ? `✅ ${res.detail}` : `❌ ${res.detail}`, res.ok ? 'ok' : 'err')
     } finally {
       setTesting(null)
@@ -83,12 +127,15 @@ export function SettingsModal(): ReactElement | null {
 
   return (
     <div className="overlay" onClick={() => s.setSettingsOpen(false)}>
-      <div className="modal" style={{ width: 'min(880px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ width: 'min(960px, 96vw)' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>设置</h2>
           <span className="spacer" />
-          <span className="hint" style={{ maxWidth: '46%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {s.info?.pondRoot}
+          <span
+            className="hint"
+            style={{ maxWidth: '46%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {s.info?.configFile}
           </span>
           <button className="btn sm ghost" onClick={() => s.setSettingsOpen(false)}>
             关闭
@@ -105,193 +152,367 @@ export function SettingsModal(): ReactElement | null {
         <div className="modal-body">
           {tab === 'api' ? (
             <>
-              <div className="section-title">对话模型（OpenAI 兼容接口）</div>
+              <div className="section-title">运行方式</div>
               <div className="grid2">
                 <div className="field">
-                  <label>运行模式</label>
-                  <select
-                    value={d.provider.mode}
-                    onChange={(e) => patch('provider', { ...d.provider, mode: e.target.value as 'api' | 'mock' })}
-                  >
-                    <option value="api">调用真实接口（DeepSeek 或任意 OpenAI 兼容服务）</option>
+                  <label>模式</label>
+                  <select value={d.mode} onChange={(e) => patch('mode', e.target.value as 'api' | 'mock')}>
+                    <option value="api">调用真实接口（任意 OpenAI 兼容服务）</option>
                     <option value="mock">排练模式（本地假装是它，不联网）</option>
                   </select>
+                </div>
+                <div className="field">
+                  <label>配置与密钥（DSH 同构）</label>
+                  <div className="row" style={{ flexWrap: 'wrap' }}>
+                    <button className="btn sm" onClick={() => void window.farm.config.open('config')}>
+                      打开 config.yaml
+                    </button>
+                    <button className="btn sm" onClick={() => void window.farm.config.open('credentials')}>
+                      打开 .credentials.yaml
+                    </button>
+                    <button
+                      className="btn sm"
+                      onClick={async () => {
+                        if (!window.confirm('从 ~/.dsh/.credentials.yaml 导入本机还没有的密钥引用？')) return
+                        await s.importDsh()
+                      }}
+                    >
+                      从 DSH 导入凭据
+                    </button>
+                  </div>
                   <div className="hint">
-                    DeepSeek 官方填 <code>https://api.deepseek.com</code>，模型 <code>deepseek-chat</code>；
-                    本机 Ollama 可填 <code>http://127.0.0.1:11434/v1</code>。
+                    密钥不写进 config.yaml，只写 <code>apiKeyEnv</code> 引用名；真实值在{' '}
+                    <code>.credentials.yaml</code> 的 <code>refs</code> 下，解析顺序：引用 → 同名环境变量。
                   </div>
                 </div>
-                <div className="field">
-                  <label>接口地址 Base URL</label>
-                  <input
-                    type="text"
-                    value={d.provider.baseUrl}
-                    placeholder="https://api.deepseek.com"
-                    onChange={(e) => patch('provider', { ...d.provider, baseUrl: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>模型</label>
-                  <input
-                    type="text"
-                    value={d.provider.model}
-                    placeholder="deepseek-chat"
-                    onChange={(e) => patch('provider', { ...d.provider, model: e.target.value })}
-                  />
-                </div>
-                <div className="field">
-                  <label>API Key {s.info?.hasSecret.text ? '（已保存，留空表示不改）' : ''}</label>
-                  <input
-                    type="password"
-                    value={keyText}
-                    placeholder={s.info?.hasSecret.text ? '••••••••（已加密保存）' : 'sk-...'}
-                    onChange={(e) => setKeyText(e.target.value)}
-                  />
-                  <div className="hint">
-                    {encAvail ? '用系统 DPAPI 加密后存在本地，不会出现在导出包里。' : '⚠ 当前系统不支持加密存储，密钥将以明文保存。'}
-                  </div>
-                </div>
-                <div className="field">
-                  <label>温度 {d.provider.temperature.toFixed(2)}</label>
-                  <input
-                    type="range"
-                    min={0}
-                    max={2}
-                    step={0.05}
-                    value={d.provider.temperature}
-                    onChange={(e) => patch('provider', { ...d.provider, temperature: Number(e.target.value) })}
-                  />
-                  <div className="hint">越高质量越跳脱。1.05 ~ 1.25 比较像这条鱼。</div>
-                </div>
-                <div className="field">
-                  <label>单次最大输出 token</label>
-                  <input
-                    type="number"
-                    min={128}
-                    max={8192}
-                    value={d.provider.maxTokens}
-                    onChange={(e) => patch('provider', { ...d.provider, maxTokens: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={d.provider.reasoning}
-                  onChange={(e) => patch('provider', { ...d.provider, reasoning: e.target.checked })}
-                />
-                显示内心 OS（推理模型的 reasoning_content，折叠在消息下面）
-              </label>
-              <div className="row">
-                <button className="btn" disabled={testing !== null} onClick={() => void runTest('text')}>
-                  {testing === 'text' ? '测试中…' : '测试对话接口'}
-                </button>
               </div>
 
-              <div className="section-title">视觉（看图）</div>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={d.provider.vision.enabled}
-                  onChange={(e) => patch('provider', { ...d.provider, vision: { ...d.provider.vision, enabled: e.target.checked } })}
-                />
-                启用视觉识别（发图时把图喂给多模态模型，并写进记忆）
-              </label>
-              <div className="grid2">
-                <div className="field">
-                  <label>视觉接口地址（留空沿用上面的）</label>
-                  <input
-                    type="text"
-                    value={d.provider.vision.baseUrl}
-                    placeholder={d.provider.baseUrl}
-                    onChange={(e) => patch('provider', { ...d.provider, vision: { ...d.provider.vision, baseUrl: e.target.value } })}
-                  />
+              <div className="section-title">Provider（接口 + 密钥引用）</div>
+              {d.providers.map((p) => {
+                const saved = providers.find((x) => x.id === p.id)
+                const cred = saved?.credential
+                const isTyping = Boolean((keyDrafts[p.apiKeyEnv] ?? '').trim())
+                return (
+                  <div className="provider-card" key={p.id}>
+                    <div className="provider-card-head">
+                      <span className="tag">{p.id}</span>
+                      <input
+                        type="text"
+                        value={p.name}
+                        style={{ maxWidth: 200 }}
+                        onChange={(e) => patchProvider(p.id, { name: e.target.value })}
+                      />
+                      <span className={`cred-pill ${cred?.source ?? 'none'}`}>
+                        凭据：{sourceLabel(cred?.source ?? 'none', cred?.encrypted)}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <button
+                        className="btn sm"
+                        disabled={testing !== null}
+                        onClick={() => void runProviderTest(p.id)}
+                      >
+                        {testing === `provider:${p.id}` ? '测试中…' : '测试连通'}
+                      </button>
+                      <button className="btn sm danger" onClick={() => removeProvider(p.id)}>
+                        删除
+                      </button>
+                    </div>
+
+                    <div className="provider-grid">
+                      <div className="field">
+                        <label>Base URL</label>
+                        <input
+                          type="text"
+                          value={p.baseUrl}
+                          placeholder="https://api.deepseek.com"
+                          onChange={(e) => patchProvider(p.id, { baseUrl: e.target.value })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>密钥引用名（apiKeyEnv）</label>
+                        <input
+                          type="text"
+                          value={p.apiKeyEnv}
+                          placeholder="DEEPSEEK_API_KEY"
+                          onChange={(e) => patchProvider(p.id, { apiKeyEnv: e.target.value.toUpperCase() })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>模型列表（逗号分隔）</label>
+                        <input
+                          type="text"
+                          value={p.models.join(', ')}
+                          placeholder="deepseek-chat, deepseek-reasoner"
+                          onChange={(e) =>
+                            patchProvider(p.id, {
+                              models: e.target.value
+                                .split(',')
+                                .map((x) => x.trim())
+                                .filter(Boolean)
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label>写入密钥（{p.apiKeyEnv}）</label>
+                        <div className="row">
+                          <input
+                            type="password"
+                            value={keyDrafts[p.apiKeyEnv] ?? ''}
+                            placeholder={cred?.configured ? '已配置，留空表示不改' : 'sk-...'}
+                            onChange={(e) =>
+                              setKeyDrafts((prev) => ({ ...prev, [p.apiKeyEnv]: e.target.value }))
+                            }
+                          />
+                          <button className="btn sm" disabled={!isTyping} onClick={() => void saveKey(p.apiKeyEnv)}>
+                            保存
+                          </button>
+                          {cred?.source === 'store' ? (
+                            <button className="btn sm ghost" onClick={() => void s.removeCredential(p.apiKeyEnv)}>
+                              清除
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="hint">
+                          {encAvail
+                            ? '保存时用系统 DPAPI 加密；也可设置同名环境变量，二者都缺时请求会失败。'
+                            : '⚠ 当前系统不支持 DPAPI，密钥会以 base64 形式落盘（仍不进 config.yaml）。'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="row">
+                <button className="btn sm" onClick={addProvider}>
+                  ＋ 添加 Provider
+                </button>
+                <span className="hint">
+                  引用名建议用 <code>DEEPSEEK_API_KEY</code> / <code>VISION_API_KEY</code> 这种环境变量风格。
+                </span>
+              </div>
+
+              <div className="section-title">路由（每条能力选一个 provider + 模型）</div>
+              <div className="route-card">
+                <div className="route-title">对话</div>
+                <div className="route-grid">
+                  <div className="field">
+                    <label>Provider</label>
+                    <select
+                      value={d.routes.text.providerId}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, text: { ...d.routes.text, providerId: e.target.value } })
+                      }
+                    >
+                      {d.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}（{p.id}）
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>模型</label>
+                    <input
+                      type="text"
+                      list="ff-models-text"
+                      value={d.routes.text.model}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, text: { ...d.routes.text, model: e.target.value } })
+                      }
+                    />
+                    <datalist id="ff-models-text">
+                      {(d.providers.find((p) => p.id === d.routes.text.providerId)?.models ?? []).map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="field">
+                    <label>温度 {d.routes.text.temperature.toFixed(2)}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      value={d.routes.text.temperature}
+                      onChange={(e) =>
+                        patch('routes', {
+                          ...d.routes,
+                          text: { ...d.routes.text, temperature: Number(e.target.value) }
+                        })
+                      }
+                    />
+                    <div className="hint">1.05 ~ 1.25 比较像这条鱼。</div>
+                  </div>
+                  <div className="field">
+                    <label>最大输出 token / 超时</label>
+                    <div className="row">
+                      <input
+                        type="number"
+                        min={128}
+                        max={8192}
+                        value={d.routes.text.maxTokens}
+                        onChange={(e) =>
+                          patch('routes', {
+                            ...d.routes,
+                            text: { ...d.routes.text, maxTokens: Number(e.target.value) }
+                          })
+                        }
+                      />
+                      <input
+                        type="number"
+                        min={10}
+                        max={600}
+                        value={Math.round(d.routes.text.timeoutMs / 1000)}
+                        onChange={(e) =>
+                          patch('routes', {
+                            ...d.routes,
+                            text: { ...d.routes.text, timeoutMs: Number(e.target.value) * 1000 }
+                          })
+                        }
+                      />
+                      <span className="hint">秒</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="field">
-                  <label>视觉模型</label>
-                  <input
-                    type="text"
-                    value={d.provider.vision.model}
-                    placeholder="例如 qwen-vl-max / glm-4v / gpt-4o-mini"
-                    onChange={(e) => patch('provider', { ...d.provider, vision: { ...d.provider.vision, model: e.target.value } })}
-                  />
+                <div className="row">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={d.routes.text.reasoning}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, text: { ...d.routes.text, reasoning: e.target.checked } })
+                      }
+                    />
+                    显示内心 OS（reasoning_content）
+                  </label>
+                  <span style={{ flex: 1 }} />
+                  <button className="btn sm" disabled={testing !== null} onClick={() => void runTest('text')}>
+                    {testing === 'text' ? '测试中…' : '测试对话接口'}
+                  </button>
                 </div>
-                <div className="field">
-                  <label>视觉 API Key（留空沿用对话的）</label>
-                  <input
-                    type="password"
-                    value={keyVision}
-                    placeholder={s.info?.hasSecret.vision ? '••••••••（已保存）' : '可留空'}
-                    onChange={(e) => setKeyVision(e.target.value)}
-                  />
+              </div>
+
+              <div className="route-card">
+                <div className="route-title">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={d.routes.vision.enabled}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, vision: { ...d.routes.vision, enabled: e.target.checked } })
+                      }
+                    />
+                    视觉（看图）
+                  </label>
                 </div>
-                <div className="field">
-                  <label>&nbsp;</label>
-                  <button className="btn" disabled={testing !== null} onClick={() => void runTest('vision')}>
+                <div className="route-grid">
+                  <div className="field">
+                    <label>Provider</label>
+                    <select
+                      value={d.routes.vision.providerId}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, vision: { ...d.routes.vision, providerId: e.target.value } })
+                      }
+                    >
+                      {d.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}（{p.id}）
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>模型</label>
+                    <input
+                      type="text"
+                      value={d.routes.vision.model}
+                      placeholder="qwen-vl-max / glm-4v / gpt-4o-mini"
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, vision: { ...d.routes.vision, model: e.target.value } })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="hint">
+                  启用后，发图时会把缩略图发给这个模型做描述，并把描述写进记忆；不启用时只能看到文件名。
+                </div>
+                <div className="row">
+                  <span style={{ flex: 1 }} />
+                  <button className="btn sm" disabled={testing !== null} onClick={() => void runTest('vision')}>
                     {testing === 'vision' ? '测试中…' : '测试视觉接口'}
                   </button>
                 </div>
               </div>
 
-              <div className="section-title">画图（图文并茂）</div>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={d.provider.image.enabled}
-                  onChange={(e) => patch('provider', { ...d.provider, image: { ...d.provider.image, enabled: e.target.checked } })}
-                />
-                启用图片生成（它可以在回复里画一张给你）
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={d.memory.allowDraw}
-                  onChange={(e) => patch('memory', { ...d.memory, allowDraw: e.target.checked })}
-                />
-                允许它主动画图（否则只在你明确要求时画）
-              </label>
-              <div className="grid3">
-                <div className="field">
-                  <label>生图接口地址</label>
-                  <input
-                    type="text"
-                    value={d.provider.image.baseUrl}
-                    placeholder="例如 https://api.siliconflow.cn"
-                    onChange={(e) => patch('provider', { ...d.provider, image: { ...d.provider.image, baseUrl: e.target.value } })}
-                  />
+              <div className="route-card">
+                <div className="route-title">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={d.routes.image.enabled}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, image: { ...d.routes.image, enabled: e.target.checked } })
+                      }
+                    />
+                    生图（图文并茂）
+                  </label>
                 </div>
-                <div className="field">
-                  <label>生图模型</label>
-                  <input
-                    type="text"
-                    value={d.provider.image.model}
-                    placeholder="例如 Kolors / flux-schnell"
-                    onChange={(e) => patch('provider', { ...d.provider, image: { ...d.provider.image, model: e.target.value } })}
-                  />
+                <div className="route-grid">
+                  <div className="field">
+                    <label>Provider</label>
+                    <select
+                      value={d.routes.image.providerId}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, image: { ...d.routes.image, providerId: e.target.value } })
+                      }
+                    >
+                      {d.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}（{p.id}）
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>模型</label>
+                    <input
+                      type="text"
+                      value={d.routes.image.model}
+                      placeholder="Kolors / flux-schnell"
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, image: { ...d.routes.image, model: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label>尺寸</label>
+                    <input
+                      type="text"
+                      value={d.routes.image.size}
+                      onChange={(e) =>
+                        patch('routes', { ...d.routes, image: { ...d.routes.image, size: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label>主动性</label>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={d.memory.allowDraw}
+                        onChange={(e) => patch('memory', { ...d.memory, allowDraw: e.target.checked })}
+                      />
+                      允许它主动画图
+                    </label>
+                  </div>
                 </div>
-                <div className="field">
-                  <label>尺寸</label>
-                  <input
-                    type="text"
-                    value={d.provider.image.size}
-                    placeholder="1024x1024"
-                    onChange={(e) => patch('provider', { ...d.provider, image: { ...d.provider.image, size: e.target.value } })}
-                  />
+                <div className="row">
+                  <span style={{ flex: 1 }} />
+                  <button className="btn sm" disabled={testing !== null} onClick={() => void runTest('image')}>
+                    {testing === 'image' ? '测试中…' : '测试生图接口'}
+                  </button>
                 </div>
-              </div>
-              <div className="row">
-                <div className="field" style={{ flex: 1 }}>
-                  <label>生图 API Key</label>
-                  <input
-                    type="password"
-                    value={keyImage}
-                    placeholder={s.info?.hasSecret.image ? '••••••••（已保存）' : '可留空'}
-                    onChange={(e) => setKeyImage(e.target.value)}
-                  />
-                </div>
-                <button className="btn" style={{ marginTop: 20 }} disabled={testing !== null} onClick={() => void runTest('image')}>
-                  {testing === 'image' ? '测试中…' : '测试生图接口'}
-                </button>
               </div>
             </>
           ) : null}
@@ -475,6 +696,27 @@ export function SettingsModal(): ReactElement | null {
 
           {tab === 'data' ? (
             <>
+              <div className="section-title">文件位置（与 DSH 类似：配置与密钥同目录）</div>
+              <div className="field">
+                <label>config.yaml</label>
+                <input type="text" value={s.info?.configFile ?? ''} readOnly />
+              </div>
+              <div className="field">
+                <label>.credentials.yaml（密钥引用，值已加密）</label>
+                <input type="text" value={s.info?.credentialsFile ?? ''} readOnly />
+              </div>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                <button className="btn sm" onClick={() => void window.farm.config.open('config')}>
+                  打开 config.yaml
+                </button>
+                <button className="btn sm" onClick={() => void window.farm.config.open('credentials')}>
+                  打开 .credentials.yaml
+                </button>
+                <button className="btn sm" onClick={() => void window.farm.app.openPath(s.info?.configDir ?? '')}>
+                  打开配置目录
+                </button>
+              </div>
+
               <div className="section-title">鱼塘位置</div>
               <div className="field">
                 <label>当前鱼塘</label>
@@ -501,9 +743,6 @@ export function SettingsModal(): ReactElement | null {
                   }}
                 >
                   更换位置并搬迁
-                </button>
-                <button className="btn sm" onClick={() => void window.farm.app.openPath(s.info?.userData ?? '')}>
-                  打开配置目录
                 </button>
               </div>
 
@@ -543,22 +782,31 @@ export function SettingsModal(): ReactElement | null {
                 每只都有自己的名字、性格和一套独立的压缩记忆；它们会自己把聊天压成记忆卡片，
                 过几天你提到相关的事，它会翻出那张卡甚至那张图，指给你看。
               </div>
+              <div className="section-title">配置与密钥</div>
+              <div className="hint" style={{ lineHeight: 1.85 }}>
+                配置在 <code>config.yaml</code>，密钥在 <code>.credentials.yaml</code>。provider 只记录{' '}
+                <code>baseUrl</code> 与 <code>apiKeyEnv</code>（引用名）；运行时按「引用 → 环境变量」解析。
+                这套结构参考了 DeepSeek Harness 的 provider + credentials 设计，并支持从 DSH 一键导入已有凭据。
+              </div>
               <div className="section-title">关于角色</div>
               <div className="hint" style={{ lineHeight: 1.85 }}>
                 大肥鱼是 DeepSeek 的<b>民间二创</b>形象（蓝发、呆毛、鲸尾、爱吃白米饭与 token、呆萌又带点屑），
-                与官方无关，本软件也非官方作品。软件内的鱼形象、贴纸全部是用代码现画的原创 SVG，
-                没有使用任何第三方图片素材。请勿将本软件或其素材用于商业用途。
+                与官方无关，本软件也非官方作品。软件内的鱼形象、贴纸全部来自授权立绘与表情表，
+                未使用任何第三方投稿图。请勿将本软件或其素材用于商业用途。
               </div>
               <div className="section-title">数据与隐私</div>
               <div className="hint" style={{ lineHeight: 1.85 }}>
                 所有对话、记忆与图片都只存在你自己的鱼塘文件夹里；请求只发往你自己填的那个 API 地址。
-                API Key {encAvail ? '用系统 DPAPI 加密保存' : '（当前系统不支持加密）'}，不上传、不写日志、不进导出包。
+                API Key {encAvail ? '用系统 DPAPI 加密保存在 .credentials.yaml' : '（当前系统不支持加密，以 base64 保存）'}，
+                不上传、不写日志、不进导出包。
               </div>
               <div className="section-title">路径</div>
               <div className="hint" style={{ lineHeight: 1.85 }}>
                 鱼塘：{s.info?.pondRoot}
                 <br />
-                配置：{s.info?.userData}
+                配置：{s.info?.configFile}
+                <br />
+                密钥：{s.info?.credentialsFile}
                 <br />
                 内置插件：{s.info?.bundledPluginsDir}
               </div>
@@ -570,7 +818,7 @@ export function SettingsModal(): ReactElement | null {
           <button className="btn ghost" onClick={() => s.setSettingsOpen(false)}>
             关闭
           </button>
-          <button className="btn primary" onClick={() => void save()}>
+          <button className="btn primary" onClick={() => void saveDraft().then(() => s.toast('设置已保存', 'ok'))}>
             保存设置
           </button>
         </div>

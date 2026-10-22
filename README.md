@@ -83,7 +83,9 @@ node scripts/screenshot.mjs # 实机截图到 docs/screenshots/
 2. 填 API：DeepSeek 官方填 `https://api.deepseek.com` + `deepseek-chat`；
    也可以先选「排练模式」进去看看界面，之后再改。
    - 任意 OpenAI 兼容接口都行（本地 Ollama：`http://127.0.0.1:11434/v1`）。
-   - 视觉、生图是**可选**的，分别单独配置地址 / 模型 / Key。
+   - 视觉、生图是**可选**的，在「设置 → 连接」里各自选 provider + 模型。
+   - 密钥不会写进 `config.yaml`，而是存进 `.credentials.yaml`（DPAPI 加密），
+     配置里只留 `apiKeyEnv: DEEPSEEK_API_KEY` 这样的引用名。
 3. 给它起名字、挑体色、掷一次「性格骰子」。
 4. 开始聊天。发图片 → 它记住 → 过几天你提起 → 它会引用给你看。
 
@@ -120,6 +122,31 @@ node scripts/screenshot.mjs # 实机截图到 docs/screenshots/
 格式细节与打分公式见 [docs/MEMORY.md](docs/MEMORY.md)。
 
 ---
+
+## 配置与密钥（与 DSH 同构）
+
+配置方式参考了 DeepSeek Harness 的 **provider + credentials** 设计：
+
+- `config.yaml` 只写接口地址、模型和 `apiKeyEnv: DEEPSEEK_API_KEY` 这样的**引用名**；
+- 真实密钥在同目录 `.credentials.yaml` 的 `refs` 下，默认用系统 DPAPI 加密；
+- 解析顺序：`refs` → 同名环境变量；每次请求重新读取，改文件立即生效；
+- 对话 / 视觉 / 生图是三条 route，可以各指向不同 provider；
+- 「设置 → 连接」可一键从 `~/.dsh/.credentials.yaml` 导入已有凭据（只导入、不改动 DSH 文件）。
+
+```yaml
+providers:
+  - id: deepseek
+    name: DeepSeek 官方
+    baseUrl: https://api.deepseek.com
+    apiKeyEnv: DEEPSEEK_API_KEY      # 密钥引用名，不是密钥
+    models: [deepseek-chat, deepseek-reasoner]
+routes:
+  text: { providerId: deepseek, model: deepseek-chat, temperature: 1.1, maxTokens: 1600, reasoning: false, timeoutMs: 180000 }
+```
+
+完整 schema、环境变量、多接口示例、v1 迁移与排错见 [docs/CONFIG.md](docs/CONFIG.md)。
+
+![连接与密钥设置](docs/screenshots/settings.jpg)
 
 ## 插件化
 
@@ -160,7 +187,8 @@ module.exports.activate = (api) => {
 | 构建 | electron-vite 6 + Vite 8 | 主进程 / preload / 渲染进程三份产物 |
 | 界面 | React 19 + TypeScript | 自写 CSS 设计系统，无 UI 框架 |
 | 渲染 | marked + DOMPurify | 先清洗再加引用徽章，避免 XSS |
-| 存储 | JSON + gzip（zlib） | 无数据库、无原生依赖，便于备份/迁移 |
+| 存储 | JSON + gzip（数据）；YAML（配置/密钥） | 无数据库、无原生依赖，便于备份/迁移 |
+| 配置 | `config.yaml` + `.credentials.yaml` | 与 DeepSeek Harness 同构：引用名、环境变量回落、多 provider |
 | 安全 | contextIsolation + custom protocol | 渲染进程无 Node 权限；图片走 `fatfish://` |
 | 打包 | electron-builder 26 | NSIS 安装包 |
 
@@ -180,7 +208,8 @@ resources/art/      角色素材 + 原始许可（代码里另有一份供 Vite 
 
 - 对话、记忆、图片只写在**你选择的鱼塘目录**；不经过任何中转服务器。
 - 请求只发往**你自己填的** API 地址（对话 / 视觉 / 生图各一个）。
-- API Key 用系统 DPAPI（`safeStorage`）加密保存在配置目录，不进日志、不进导出包。
+- API Key 用系统 DPAPI（`safeStorage`）加密保存在 `.credentials.yaml`，配置里只有引用名；
+  不上传、不写日志、不进导出包；也可改用同名环境变量。
 - 导出包 `.fatfish` / `.fatmem` 是 gzip 压缩的单文件，里面没有 Key。
 - 没有任何遥测。
 

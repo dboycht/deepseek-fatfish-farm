@@ -160,18 +160,49 @@ export interface FishSummary extends FishProfile {
   lastChat?: { id: string; title: string; updated: number }
 }
 
-export interface ProviderConfig {
-  /** api = 真实接口；mock = 本地排练模式（不联网） */
-  mode: 'api' | 'mock'
+/**
+ * 配置模型（v2，参考 DeepSeek Harness 的做法）：
+ *  - `providers[]` 存接口地址与「密钥引用名」，**不存密钥本身**；
+ *  - 密钥放在同目录 `.credentials.yaml` 的 `refs` 里，运行时先查它、再回落同名环境变量；
+ *  - 对话 / 视觉 / 生图是三条 route，各自指向 provider + model。
+ */
+export interface ProviderProfile {
+  id: string
+  name: string
   baseUrl: string
+  /** 密钥引用名（DSH 里的 apiKeyEnv），如 DEEPSEEK_API_KEY */
+  apiKeyEnv: string
+  models: string[]
+  headers?: Record<string, string>
+}
+
+export interface TextRoute {
+  providerId: string
   model: string
   temperature: number
   maxTokens: number
   /** 是否请求并展示内心 OS */
   reasoning: boolean
   timeoutMs: number
-  vision: { enabled: boolean; baseUrl: string; model: string }
-  image: { enabled: boolean; baseUrl: string; model: string; size: string }
+}
+
+export interface VisionRoute {
+  enabled: boolean
+  providerId: string
+  model: string
+}
+
+export interface ImageRoute {
+  enabled: boolean
+  providerId: string
+  model: string
+  size: string
+}
+
+export interface RoutesConfig {
+  text: TextRoute
+  vision: VisionRoute
+  image: ImageRoute
 }
 
 export interface MemoryConfig {
@@ -195,20 +226,62 @@ export interface UiConfig {
 }
 
 export interface AppConfig {
+  /** 2 = 配置/密钥分离（DSH 风格） */
   v: number
   /** 鱼塘根目录：所有肥鱼实例的父目录 */
   pondRoot: string
   onboarded: boolean
-  provider: ProviderConfig
+  /** api = 真实接口；mock = 本地排练模式（不联网） */
+  mode: 'api' | 'mock'
+  providers: ProviderProfile[]
+  routes: RoutesConfig
   memory: MemoryConfig
   ui: UiConfig
   plugins: { disabled: string[] }
 }
 
-export interface Secrets {
-  text?: string
-  vision?: string
-  image?: string
+export interface CredentialDescriptor {
+  ref: string
+  configured: boolean
+  /** store = .credentials.yaml；env = 进程环境变量；none = 都没有 */
+  source: 'store' | 'env' | 'none'
+  /** 是否以系统 DPAPI 加密后落盘 */
+  encrypted?: boolean
+}
+
+export interface ProviderView extends ProviderProfile {
+  credential: CredentialDescriptor
+}
+
+export interface ConfigPaths {
+  configDir: string
+  configFile: string
+  credentialsFile: string
+}
+
+export interface DshImportResult {
+  path: string
+  imported: string[]
+  skipped: string[]
+  error?: string
+}
+
+/** 运行时解析出来的端点（provider + 路由 + 密钥 + 模型），不落盘 */
+export interface ResolvedEndpoint {
+  providerId: string
+  providerName: string
+  mode: 'api' | 'mock'
+  baseUrl: string
+  apiKey: string
+  apiKeyEnv: string
+  apiKeySource: CredentialDescriptor['source']
+  model: string
+  temperature: number
+  maxTokens: number
+  timeoutMs: number
+  reasoning: boolean
+  headers?: Record<string, string>
+  imageSize?: string
 }
 
 export interface PluginManifest {
@@ -242,8 +315,12 @@ export interface AppInfo {
   chrome: string
   platform: string
   userData: string
+  configDir: string
+  configFile: string
+  credentialsFile: string
   pondRoot: string
-  hasSecret: { text: boolean; vision: boolean; image: boolean }
+  /** 当前所有 provider 引用的凭据状态（只给状态，不给值） */
+  credentials: CredentialDescriptor[]
   bundledPluginsDir: string
 }
 

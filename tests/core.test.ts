@@ -5,6 +5,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scoreCards, tokenize } from '../src/shared/recall'
 import { flavorFromSeed, levelFromExp, moodWord, personaFromSeed } from '../src/shared/persona'
+import {
+  defaultConfig,
+  migrateV1,
+  modelForRoute,
+  normalizeConfig,
+  providerForRoute,
+  sanitizeRef
+} from '../src/shared/config'
+import {
+  decodeCredentialValue,
+  encodeCredentialValue,
+  isCredentialRef,
+  parseCredentialDocument,
+  resolveCredentialFromSources,
+  serializeCredentialDocument
+} from '../src/main/credentials-file'
 import { readGzJSON, readJSON, writeGzJSON, writeJSON } from '../src/main/util/fsx'
 import type { MemoryCard } from '../src/shared/types'
 
@@ -142,4 +158,148 @@ test('落盘：gzip 往返一致，且重复内容压缩率足够低', async () 
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+/* ------------------------------------------------------------------ *
+ * 配置 v2 / 凭据（DSH 风格）
+ * ------------------------------------------------------------------ */
+
+test('配置 v2：默认值完整，坏值会被夹紧', () => {
+  const def = defaultConfig('/pond')
+  assert.equal(def.v, 2)
+  assert.ok(def.providers.length >= 1)
+  assert.equal(def.routes.text.providerId, def.providers[0].id)
+  assert.equal(def.mode, 'api')
+
+  const cfg = normalizeConfig(
+    {
+      providers: [{ id: 'X Y', name: '', baseUrl: 'https://a.example/v1/', apiKeyEnv: 'bad ref!' }],
+      routes: { text: { providerId: 'nope', temperature: 9, maxTokens: 99999, timeoutMs: 1 } },
+      memory: { every: 999, recall: 999 },
+      mode: 'what'
+    },
+    '/fallback'
+  )
+  assert.equal(cfg.providers[0].id, 'x-y')
+  assert.equal(cfg.providers[0].baseUrl, 'https://a.example/v1')
+  assert.ok(isCredentialRef(cfg.providers[0].apiKeyEnv))
+  assert.equal(cfg.routes.text.providerId, cfg.providers[0].id)
+  assert.ok(cfg.routes.text.temperature <= 2)
+  assert.ok(cfg.routes.text.maxTokens <= 8192)
+  assert.ok(cfg.routes.text.timeoutMs >= 10_000)
+  assert.ok(cfg.memory.every <= 40)
+  assert.ok(cfg.memory.recall <= 20)
+  assert.equal(cfg.mode, 'api')
+  assert.equal(cfg.pondRoot, '/fallback')
+})
+
+test('v1 → v2 迁移：同 URL 复用 provider，独立视觉密钥另建', () => {
+  const legacy = {
+    pondRoot: '/p',
+    onboarded: true,
+    provider: {
+      mode: 'api' as const,
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-chat',
+      temperature: 1.2,
+      maxTokens: 2000,
+      vision: { enabled: true, baseUrl: 'https://vision.example/v1', model: 'vl-1' },
+      image: { enabled: true, baseUrl: 'https://api.deepseek.com', model: 'img-1', size: '512x512' }
+    }
+  }
+  const res = migrateV1(legacy, { text: 'sk-text', vision: 'sk-vision', image: 'sk-image' }, '/fallback')
+  assert.equal(res.config.pondRoot, '/p')
+  assert.equal(res.config.onboarded, true)
+  assert.equal(res.config.providers.length, 3)
+  assert.equal(res.credentials.DEEPSEEK_API_KEY, 'sk-text')
+  assert.equal(res.credentials.VISION_API_KEY, 'sk-vision')
+  assert.equal(res.credentials.IMAGE_API_KEY, 'sk-image')
+  assert.equal(res.config.routes.vision.enabled, true)
+  assert.equal(res.config.routes.vision.providerId, 'vision')
+  assert.equal(res.config.routes.image.providerId, 'image')
+  assert.equal(res.config.routes.text.model, 'deepseek-chat')
+})
+
+test('v1 → v2 迁移：同 URL 同密钥时复用，不重复建 provider', () => {
+  const legacy = {
+    provider: {
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-chat',
+      vision: { enabled: true, model: 'deepseek-vl' },
+      image: { enabled: true, model: 'deepseek-image' }
+    }
+  }
+  const res = migrateV1(legacy, { text: 'sk-same' }, '/fallback')
+  assert.equal(res.config.providers.length, 1)
+  assert.equal(res.config.routes.vision.providerId, res.config.providers[0].id)
+  assert.equal(res.config.routes.image.providerId, res.config.providers[0].id)
+  assert.equal(res.credentials.DEEPSEEK_API_KEY, 'sk-same')
+})
+
+test('凭据文件：解析/序列化保持 DSH 形状，坏引用被忽略', () => {
+  const text = `version: 1
+refs:
+  DEEPSEEK_API_KEY: sk-abc
+  BAD-REF: x
+  lower_key: y
+records: []
+`
+  const doc = parseCredentialDocument(text)
+  assert.deepEqual(Object.keys(doc.refs), ['DEEPSEEK_API_KEY'])
+  assert.equal(doc.refs.DEEPSEEK_API_KEY, 'sk-abc')
+  assert.equal(doc.version, 1)
+
+  const out = serializeCredentialDocument(doc)
+  assert.match(out, /refs:/)
+  assert.match(out, /DEEPSEEK_API_KEY/)
+  assert.match(out, /records:/)
+  assert.deepEqual(parseCredentialDocument(out), doc)
+})
+
+test('凭据解析：refs 优先于环境变量，缺失时 undefined', () => {
+  assert.deepEqual(resolveCredentialFromSources('store-key', { K: 'env-key' }, 'K'), {
+    value: 'store-key',
+    source: 'store'
+  })
+  assert.deepEqual(resolveCredentialFromSources(null, { K: 'env-key' }, 'K'), {
+    value: 'env-key',
+    source: 'env'
+  })
+  assert.equal(resolveCredentialFromSources('', {}, 'K'), undefined)
+})
+
+test('凭据编解码：加密/明文回退都能还原，引用名可规范化', () => {
+  const enc = encodeCredentialValue('sk-test', (v) => Buffer.from(`x${v}`).toString('base64'))
+  assert.ok(enc.startsWith('enc:v1:'))
+  const dec = decodeCredentialValue(enc, (c) => {
+    const s = Buffer.from(c, 'base64').toString('utf8')
+    return s.startsWith('x') ? s.slice(1) : null
+  })
+  assert.equal(dec, 'sk-test')
+
+  const raw = encodeCredentialValue('sk-plain', () => null)
+  assert.ok(raw.startsWith('raw:v1:'))
+  assert.equal(decodeCredentialValue(raw, () => null), 'sk-plain')
+
+  assert.equal(sanitizeRef('my key!', 'FALLBACK'), 'MY_KEY')
+  assert.equal(sanitizeRef('9lives', 'FALLBACK'), 'KEY_9LIVES')
+  assert.equal(sanitizeRef('', 'FALLBACK'), 'FALLBACK')
+})
+
+test('路由：provider 丢失时回退第一个，模型丢失时回退 provider 首个模型', () => {
+  const cfg = normalizeConfig(
+    {
+      providers: [
+        { id: 'a', baseUrl: 'https://a', apiKeyEnv: 'A_KEY', models: ['a-1'] },
+        { id: 'b', baseUrl: 'https://b', apiKeyEnv: 'B_KEY', models: ['b-1'] }
+      ],
+      routes: { text: { providerId: 'a', model: '' } }
+    },
+    '/p'
+  )
+  assert.equal(modelForRoute(cfg, 'text'), 'a-1')
+  cfg.routes.text.providerId = 'missing'
+  assert.equal(providerForRoute(cfg, 'text')?.id, 'a')
+  cfg.routes.text.model = 'a-2'
+  assert.equal(modelForRoute(cfg, 'text'), 'a-2')
 })

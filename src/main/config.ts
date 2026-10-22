@@ -1,76 +1,133 @@
-import { app } from 'electron'
+import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { readJSON, writeJSON } from './util/fsx'
+import { app } from 'electron'
+import YAML from 'yaml'
+import { readJSON, writeAtomic } from './util/fsx'
+import { configFile, legacyConfigFile } from './paths'
+import { readLegacySecrets, retireLegacySecrets, setCredentialValues } from './credentials'
+import {
+  defaultConfig,
+  isLegacyConfig,
+  migrateV1,
+  normalizeConfig,
+  type LegacyV1Config
+} from '@shared/config'
 import type { AppConfig } from '@shared/types'
+
+/**
+ * 配置（v2）：`config.yaml`。
+ *
+ * 与 DSH 对齐：
+ *  - 人类可读的 YAML，可手改；
+ *  - provider 只写 baseUrl + apiKeyEnv（引用名）+ models；
+ *  - 真正的密钥在同目录 `.credentials.yaml`；
+ *  - 首次启动检测到 v1 的 config.json / secrets.bin 时自动迁移并留档。
+ */
 
 export function defaultPondRoot(): string {
   return join(app.getPath('documents'), 'DeepSeek肥鱼养殖场')
 }
 
-export function configFile(): string {
-  return join(app.getPath('userData'), 'config.json')
-}
+const CONFIG_HEADER = `# DeepSeek 肥鱼养殖场 · 配置
+# 密钥不在这里：providers[].apiKeyEnv 只是引用名，
+# 值在同目录 .credentials.yaml 的 refs 下（也可用同名环境变量）。
+# 直接改这个文件也可以，保存后重启生效。`
 
-export function defaultConfig(): AppConfig {
-  return {
-    v: 1,
-    pondRoot: defaultPondRoot(),
-    onboarded: false,
-    provider: {
-      mode: 'api',
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
-      temperature: 1.1,
-      maxTokens: 1600,
-      reasoning: false,
-      timeoutMs: 180000,
-      vision: { enabled: false, baseUrl: 'https://api.deepseek.com', model: '' },
-      image: { enabled: false, baseUrl: '', model: '', size: '1024x1024' }
-    },
-    memory: { auto: true, every: 6, maxCards: 400, recall: 6, allowDraw: false },
-    ui: { theme: 'abyss', showReasoning: true, fontSize: 15, animate: true },
-    plugins: { disabled: [] }
+let cache: { cfg: AppConfig; mtime: number } | null = null
+
+async function mtimeOf(file: string): Promise<number> {
+  try {
+    return (await fs.stat(file)).mtimeMs
+  } catch {
+    return 0
   }
 }
 
-let cache: AppConfig | null = null
+async function writeConfig(cfg: AppConfig): Promise<void> {
+  const file = configFile()
+  const text = `${CONFIG_HEADER}\n${YAML.stringify(cfg, { lineWidth: 0 })}`
+  await writeAtomic(file, text)
+  cache = { cfg, mtime: await mtimeOf(file) }
+}
+
+async function backupLegacyConfig(): Promise<void> {
+  const file = legacyConfigFile()
+  try {
+    await fs.rename(file, `${file}.v1.bak`)
+  } catch {
+    /* 不存在就算了 */
+  }
+}
 
 export async function loadConfig(): Promise<AppConfig> {
-  if (cache) return cache
-  const raw = await readJSON<Partial<AppConfig>>(configFile(), {})
-  const def = defaultConfig()
-  cache = {
-    ...def,
-    ...raw,
-    provider: {
-      ...def.provider,
-      ...(raw.provider ?? {}),
-      vision: { ...def.provider.vision, ...(raw.provider?.vision ?? {}) },
-      image: { ...def.provider.image, ...(raw.provider?.image ?? {}) }
-    },
-    memory: { ...def.memory, ...(raw.memory ?? {}) },
-    ui: { ...def.ui, ...(raw.ui ?? {}) },
-    plugins: { ...def.plugins, ...(raw.plugins ?? {}) }
+  const file = configFile()
+  const mtime = await mtimeOf(file)
+  if (cache && cache.mtime === mtime) return cache.cfg
+
+  let text = ''
+  try {
+    text = await fs.readFile(file, 'utf8')
+  } catch {
+    text = ''
   }
-  return cache
+  if (text.trim()) {
+    try {
+      const raw = YAML.parse(text)
+      const cfg = normalizeConfig(raw, defaultPondRoot())
+      cache = { cfg, mtime }
+      return cfg
+    } catch (e) {
+      console.warn('[config] config.yaml 解析失败，尝试旧配置：', (e as Error).message)
+    }
+  }
+
+  // 旧版 config.json → v2
+  const legacy = await readJSON<LegacyV1Config | null>(legacyConfigFile(), null)
+  if (legacy && isLegacyConfig(legacy)) {
+    const keys = await readLegacySecrets()
+    const migrated = migrateV1(legacy, keys, defaultPondRoot())
+    if (Object.keys(migrated.credentials).length) await setCredentialValues(migrated.credentials)
+    await writeConfig(migrated.config)
+    await backupLegacyConfig()
+    await retireLegacySecrets()
+    console.log(
+      `[config] 已把 v1 配置迁移为 v2（providers=${migrated.config.providers.length}）` +
+        (migrated.notes.length ? `；${migrated.notes.join('；')}` : '')
+    )
+    return migrated.config
+  }
+
+  const fresh = defaultConfig(defaultPondRoot())
+  cache = { cfg: fresh, mtime: 0 }
+  return fresh
+}
+
+function mergeConfig(current: AppConfig, patch: Partial<AppConfig>): AppConfig {
+  const merged: AppConfig = {
+    ...current,
+    ...patch,
+    pondRoot: typeof patch.pondRoot === 'string' && patch.pondRoot.trim() ? patch.pondRoot.trim() : current.pondRoot,
+    providers: Array.isArray(patch.providers) ? patch.providers : current.providers,
+    routes: {
+      text: { ...current.routes.text, ...(patch.routes?.text ?? {}) },
+      vision: { ...current.routes.vision, ...(patch.routes?.vision ?? {}) },
+      image: { ...current.routes.image, ...(patch.routes?.image ?? {}) }
+    },
+    memory: { ...current.memory, ...(patch.memory ?? {}) },
+    ui: { ...current.ui, ...(patch.ui ?? {}) },
+    plugins: { ...current.plugins, ...(patch.plugins ?? {}) }
+  }
+  return normalizeConfig(merged, current.pondRoot)
 }
 
 export async function saveConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
-  const cur = await loadConfig()
-  const next: AppConfig = {
-    ...cur,
-    ...patch,
-    provider: {
-      ...cur.provider,
-      ...(patch.provider ?? {}),
-      vision: { ...cur.provider.vision, ...(patch.provider?.vision ?? {}) },
-      image: { ...cur.provider.image, ...(patch.provider?.image ?? {}) }
-    },
-    memory: { ...cur.memory, ...(patch.memory ?? {}) },
-    ui: { ...cur.ui, ...(patch.ui ?? {}) },
-    plugins: { ...cur.plugins, ...(patch.plugins ?? {}) }
-  }
-  cache = next
-  await writeJSON(configFile(), next, true)
+  const current = await loadConfig()
+  const next = mergeConfig(current, patch)
+  await writeConfig(next)
   return next
+}
+
+/** 测试/迁移用：强制从磁盘重读 */
+export function invalidateConfigCache(): void {
+  cache = null
 }

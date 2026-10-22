@@ -1,4 +1,4 @@
-import type { ProviderConfig } from '@shared/types'
+import type { ResolvedEndpoint } from '@shared/types'
 
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -58,28 +58,28 @@ function withTimeout(parent: AbortSignal | undefined, ms: number): { signal: Abo
 }
 
 export async function chatCompletion(
-  cfg: ProviderConfig,
-  apiKey: string,
+  ep: ResolvedEndpoint,
   opts: CompletionOptions
 ): Promise<CompletionResult> {
-  const url = apiUrl(cfg.baseUrl, '/chat/completions')
+  const url = apiUrl(ep.baseUrl, '/chat/completions')
   const body: Record<string, unknown> = {
-    model: opts.model ?? cfg.model,
+    model: opts.model ?? ep.model,
     messages: opts.messages,
-    temperature: opts.temperature ?? cfg.temperature,
-    max_tokens: opts.maxTokens ?? cfg.maxTokens,
+    temperature: opts.temperature ?? ep.temperature,
+    max_tokens: opts.maxTokens ?? ep.maxTokens,
     stream: Boolean(opts.stream)
   }
   if (!body.model) throw new Error('还没有选模型')
 
-  const { signal, cancel } = withTimeout(opts.signal, cfg.timeoutMs || 180_000)
+  const { signal, cancel } = withTimeout(opts.signal, ep.timeoutMs || 180_000)
   let res: Response
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        ...(ep.headers ?? {}),
+        ...(ep.apiKey ? { Authorization: `Bearer ${ep.apiKey}` } : {})
       },
       body: JSON.stringify(body),
       signal
@@ -154,20 +154,8 @@ export async function chatCompletion(
 }
 
 /** 让视觉模型给图片写一句英文压缩描述，供记忆与检索使用 */
-export async function captionImage(
-  cfg: ProviderConfig,
-  apiKey: string,
-  dataUrl: string,
-  hint = ''
-): Promise<string> {
-  const visionCfg: ProviderConfig = {
-    ...cfg,
-    baseUrl: cfg.vision.baseUrl || cfg.baseUrl,
-    model: cfg.vision.model || cfg.model,
-    maxTokens: 120,
-    temperature: 0.2
-  }
-  const res = await chatCompletion(visionCfg, apiKey, {
+export async function captionImage(ep: ResolvedEndpoint, dataUrl: string, hint = ''): Promise<string> {
+  const res = await chatCompletion(ep, {
     messages: [
       {
         role: 'system',
@@ -193,22 +181,23 @@ export interface GeneratedImage {
   ext: string
 }
 
-export async function generateImage(
-  cfg: ProviderConfig,
-  apiKey: string,
-  prompt: string
-): Promise<GeneratedImage> {
-  const url = apiUrl(cfg.image.baseUrl || cfg.baseUrl, '/images/generations')
+export async function generateImage(ep: ResolvedEndpoint, prompt: string): Promise<GeneratedImage> {
+  const url = apiUrl(ep.baseUrl, '/images/generations')
   const body = {
-    model: cfg.image.model,
+    model: ep.model,
     prompt,
     n: 1,
-    size: cfg.image.size || '1024x1024',
+    size: ep.imageSize || '1024x1024',
     response_format: 'b64_json'
   }
+  if (!body.model) throw new Error('生图路由还没有选模型')
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(ep.headers ?? {}),
+      ...(ep.apiKey ? { Authorization: `Bearer ${ep.apiKey}` } : {})
+    },
     body: JSON.stringify(body)
   })
   if (!res.ok) {
@@ -237,10 +226,13 @@ export interface TestResult {
   models?: string[]
 }
 
-export async function testConnection(cfg: ProviderConfig, apiKey: string): Promise<TestResult> {
+export async function testConnection(ep: ResolvedEndpoint): Promise<TestResult> {
   try {
-    const res = await fetch(apiUrl(cfg.baseUrl, '/models'), {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+    const res = await fetch(apiUrl(ep.baseUrl, '/models'), {
+      headers: {
+        ...(ep.headers ?? {}),
+        ...(ep.apiKey ? { Authorization: `Bearer ${ep.apiKey}` } : {})
+      }
     })
     if (res.ok) {
       const json = (await res.json()) as any
@@ -253,7 +245,7 @@ export async function testConnection(cfg: ProviderConfig, apiKey: string): Promi
     /* 有些服务不开放 /models，退回一次极短的对话测试 */
   }
   try {
-    const r = await chatCompletion({ ...cfg, timeoutMs: 30_000 }, apiKey, {
+    const r = await chatCompletion({ ...ep, timeoutMs: 30_000 }, {
       messages: [{ role: 'user', content: 'ping' }],
       maxTokens: 4,
       temperature: 0

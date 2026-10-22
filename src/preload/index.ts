@@ -24,9 +24,17 @@ const api: FarmApi = {
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch: Partial<AppConfig>) => ipcRenderer.invoke('config:set', patch),
-    setSecrets: (patch) => ipcRenderer.invoke('config:secrets', patch),
-    secretsState: () => ipcRenderer.invoke('config:secretsState'),
-    test: (target) => ipcRenderer.invoke('config:test', target)
+    providers: () => ipcRenderer.invoke('config:providers'),
+    paths: () => ipcRenderer.invoke('config:paths'),
+    open: (kind: 'config' | 'credentials' = 'config') => ipcRenderer.invoke('config:open', kind),
+    test: (target) => ipcRenderer.invoke('config:test', target),
+    testProvider: (providerId: string) => ipcRenderer.invoke('providers:test', providerId),
+    importDsh: () => ipcRenderer.invoke('credentials:importDsh')
+  },
+  credentials: {
+    set: (ref: string, value: string) => ipcRenderer.invoke('credentials:set', ref, value),
+    remove: (ref: string) => ipcRenderer.invoke('credentials:remove', ref),
+    describe: (ref: string) => ipcRenderer.invoke('credentials:describe', ref)
   },
   pond: {
     open: () => ipcRenderer.invoke('pond:open'),

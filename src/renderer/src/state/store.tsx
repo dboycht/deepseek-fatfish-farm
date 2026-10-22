@@ -15,12 +15,14 @@ import type {
   ChatFile,
   ChatMessage,
   ChatMeta,
+  DshImportResult,
   FishProfile,
   FishSummary,
   MediaMeta,
   MemoryCard,
   MemoryStats,
   PluginInfo,
+  ProviderView,
   StreamEvent
 } from '@shared/types'
 
@@ -66,6 +68,7 @@ interface StoreShape {
   cards: MemoryCard[]
   memStats: MemoryStats | null
   media: MediaMeta[]
+  providers: ProviderView[]
   plugins: PluginInfo[]
   panelPlugin: PluginInfo | null
   settingsOpen: boolean
@@ -98,8 +101,13 @@ interface StoreShape {
   exportMemory: () => Promise<void>
   importBundle: () => Promise<void>
   saveConfig: (patch: Partial<AppConfig>) => Promise<void>
-  saveSecrets: (patch: { text?: string; vision?: string; image?: string }) => Promise<void>
+  /** 写 .credentials.yaml（ref 是 config 里的 apiKeyEnv） */
+  setCredential: (ref: string, value: string) => Promise<void>
+  removeCredential: (ref: string) => Promise<void>
+  importDsh: () => Promise<DshImportResult>
+  refreshProviders: () => Promise<void>
   testConnection: (target: 'text' | 'vision' | 'image') => Promise<{ ok: boolean; detail: string }>
+  testProvider: (providerId: string) => Promise<{ ok: boolean; detail: string }>
   setSettingsOpen: (v: boolean) => void
   setCreateOpen: (v: boolean) => void
   setShowMemory: (v: boolean) => void
@@ -134,6 +142,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
   const [cards, setCards] = useState<MemoryCard[]>([])
   const [memStats, setMemStats] = useState<MemoryStats | null>(null)
   const [media, setMedia] = useState<MediaMeta[]>([])
+  const [providers, setProviders] = useState<ProviderView[]>([])
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [panelPlugin, setPanelPlugin] = useState<PluginInfo | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -163,9 +172,10 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
 
   useEffect(() => {
     void (async () => {
-      const [c, i] = await Promise.all([api.config.get(), api.app.info()])
+      const [c, i, pv] = await Promise.all([api.config.get(), api.app.info(), api.config.providers()])
       setCfg(c)
       setInfo(i)
+      setProviders(pv)
       const list = await api.fish.list()
       setFishList(list)
       if (list.length) await selectFishInternal(list[0].id)
@@ -571,22 +581,55 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
     }
   }, [refreshFish, refreshMemory, selectFishInternal, toast])
 
-  const saveConfig = useCallback(async (patch: Partial<AppConfig>) => {
-    const next = await api.config.set(patch)
-    setCfg(next)
-    return
+  const refreshProviders = useCallback(async () => {
+    setProviders(await api.config.providers())
   }, [])
 
-  const saveSecrets = useCallback(
-    async (patch: { text?: string; vision?: string; image?: string }) => {
-      const state = await api.config.setSecrets(patch)
-      setInfo((prev) => (prev ? { ...prev, hasSecret: state } : prev))
-      toast('密钥已加密保存', 'ok')
+  const saveConfig = useCallback(
+    async (patch: Partial<AppConfig>) => {
+      const next = await api.config.set(patch)
+      setCfg(next)
+      setProviders(await api.config.providers())
+      setInfo(await api.app.info())
+    },
+    []
+  )
+
+  const setCredential = useCallback(
+    async (ref: string, value: string) => {
+      try {
+        const list = await api.credentials.set(ref, value)
+        setProviders(list)
+        setInfo(await api.app.info())
+        toast(value.trim() ? `${ref} 已保存到 .credentials.yaml` : `${ref} 已清除`, 'ok')
+      } catch (e) {
+        toast((e as Error).message, 'err')
+        throw e
+      }
     },
     [toast]
   )
 
+  const removeCredential = useCallback(async (ref: string) => {
+    setProviders(await api.credentials.remove(ref))
+    setInfo(await api.app.info())
+  }, [])
+
+  const importDsh = useCallback(async () => {
+    const res = await api.config.importDsh()
+    setProviders(await api.config.providers())
+    setInfo(await api.app.info())
+    if (res.error) toast(res.error, 'err')
+    else
+      toast(
+        `从 DSH 导入 ${res.imported.length} 个凭据${res.skipped.length ? `，跳过 ${res.skipped.length} 个已存在/无法识别的` : ''}`,
+        'ok'
+      )
+    return res
+  }, [toast])
+
   const testConnection = useCallback((target: 'text' | 'vision' | 'image') => api.config.test(target), [])
+  const testProvider = useCallback((providerId: string) => api.config.testProvider(providerId), [])
 
   const reloadPlugins = useCallback(async () => {
     const list = await api.plugins.reload()
@@ -680,6 +723,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       cards,
       memStats,
       media,
+      providers,
       plugins,
       panelPlugin,
       settingsOpen,
@@ -712,8 +756,12 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       exportMemory,
       importBundle,
       saveConfig,
-      saveSecrets,
+      setCredential,
+      removeCredential,
+      importDsh,
+      refreshProviders,
       testConnection,
+      testProvider,
       setSettingsOpen,
       setCreateOpen,
       setShowMemory,
@@ -739,6 +787,7 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
     cards,
     memStats,
     media,
+    providers,
     plugins,
     panelPlugin,
     settingsOpen,

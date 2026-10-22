@@ -1338,6 +1338,76 @@ input[type='range'] {
   }
 }
 
+/* ---------------------------------------------------------------- 连接设置 */
+
+.provider-card,
+.route-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(14, 28, 50, 0.55);
+}
+
+.route-card {
+  background: rgba(12, 24, 44, 0.5);
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-grid,
+.route-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.route-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cred-pill {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.cred-pill.store {
+  color: var(--mint);
+  border-color: rgba(127, 240, 208, 0.35);
+  background: rgba(30, 100, 90, 0.2);
+}
+
+.cred-pill.env {
+  color: var(--cyan);
+  border-color: rgba(90, 210, 255, 0.35);
+  background: rgba(20, 70, 100, 0.24);
+}
+
+.cred-pill.none {
+  color: var(--coral);
+  border-color: rgba(255, 138, 118, 0.35);
+  background: rgba(110, 50, 40, 0.18);
+}
+
+@media (max-width: 1180px) {
+  .provider-grid,
+  .route-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------------------------------------------------------------- 浅色主题 */
 
 .app.theme-dawn {

@@ -21,10 +21,10 @@ function TitleBar(): ReactElement {
       </div>
       <span className="spacer" />
       <div className="tb-actions">
-        {s.cfg?.provider.mode === 'mock' ? (
+        {s.cfg?.mode === 'mock' ? (
           <span className="pill mode-mock">排练模式（不联网）</span>
         ) : (
-          <span className="pill mode-api">{s.cfg?.provider.model || '未配置模型'}</span>
+          <span className="pill mode-api">{s.cfg?.routes.text.model || '未配置模型'}</span>
         )}
         {s.memStats ? <span className="pill">记忆 {s.memStats.cards} 条 · {((s.memStats.bytes ?? 0) / 1024).toFixed(1)} KB</span> : null}
         <button

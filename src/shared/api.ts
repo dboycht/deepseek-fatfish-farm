@@ -4,6 +4,9 @@ import type {
   ChatFile,
   ChatMessage,
   ChatMeta,
+  ConfigPaths,
+  CredentialDescriptor,
+  DshImportResult,
   FishProfile,
   FishSummary,
   ImportResult,
@@ -12,6 +15,7 @@ import type {
   MemoryEvent,
   MemoryStats,
   PluginInfo,
+  ProviderView,
   RecallHit,
   SendInput,
   StreamEvent
@@ -50,9 +54,19 @@ export interface FarmApi {
   config: {
     get(): Promise<AppConfig>
     set(patch: Partial<AppConfig>): Promise<AppConfig>
-    setSecrets(patch: { text?: string; vision?: string; image?: string }): Promise<AppInfo['hasSecret']>
-    secretsState(): Promise<AppInfo['hasSecret']>
+    /** 每个 provider + 它的凭据状态（不返回值） */
+    providers(): Promise<ProviderView[]>
+    paths(): Promise<ConfigPaths>
+    open(kind?: 'config' | 'credentials'): Promise<string>
     test(target: 'text' | 'vision' | 'image'): Promise<TestResult>
+    testProvider(providerId: string): Promise<TestResult>
+    /** 从 ~/.dsh/.credentials.yaml 导入（只导入本机没有的引用） */
+    importDsh(): Promise<DshImportResult>
+  }
+  credentials: {
+    set(ref: string, value: string): Promise<ProviderView[]>
+    remove(ref: string): Promise<ProviderView[]>
+    describe(ref: string): Promise<CredentialDescriptor | undefined>
   }
   pond: {
     open(): Promise<string>

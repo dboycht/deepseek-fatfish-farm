@@ -9,9 +9,10 @@ export function Onboarding(): ReactElement {
   const s = useStore()
   const [step, setStep] = useState(0)
   const [pond, setPond] = useState(s.cfg?.pondRoot ?? '')
-  const [mode, setMode] = useState<'api' | 'mock'>(s.cfg?.provider.mode ?? 'api')
-  const [baseUrl, setBaseUrl] = useState(s.cfg?.provider.baseUrl ?? 'https://api.deepseek.com')
-  const [model, setModel] = useState(s.cfg?.provider.model ?? 'deepseek-chat')
+  const [mode, setMode] = useState<'api' | 'mock'>(s.cfg?.mode ?? 'api')
+  const [baseUrl, setBaseUrl] = useState(s.cfg?.providers[0]?.baseUrl ?? 'https://api.deepseek.com')
+  const [providerName, setProviderName] = useState(s.cfg?.providers[0]?.name ?? 'DeepSeek 官方')
+  const [model, setModel] = useState(s.cfg?.routes.text.model ?? 'deepseek-chat')
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [hue, setHue] = useState(205)
@@ -22,6 +23,30 @@ export function Onboarding(): ReactElement {
 
   const flavor = flavorFromSeed(seed, name || '大肥鱼')
   const persona = personaFromSeed(seed)
+  const looksDeepSeek = /deepseek/i.test(baseUrl)
+
+  const buildConfig = (onboarded = true): Parameters<typeof s.saveConfig>[0] => {
+    const id = looksDeepSeek ? 'deepseek' : 'custom'
+    const ref = looksDeepSeek ? 'DEEPSEEK_API_KEY' : 'CUSTOM_API_KEY'
+    return {
+      onboarded,
+      pondRoot: pond || s.cfg?.pondRoot,
+      mode,
+      providers: [
+        {
+          id,
+          name: providerName.trim() || (looksDeepSeek ? 'DeepSeek 官方' : '自定义接口'),
+          baseUrl: baseUrl.trim(),
+          apiKeyEnv: ref,
+          models: [...new Set([model.trim()].filter(Boolean))]
+        }
+      ],
+      routes: {
+        ...s.cfg!.routes,
+        text: { ...s.cfg!.routes.text, providerId: id, model: model.trim() }
+      }
+    }
+  }
 
   const finish = async (): Promise<void> => {
     if (!name.trim()) {
@@ -30,12 +55,10 @@ export function Onboarding(): ReactElement {
     }
     setBusy(true)
     try {
-      if (key) await window.farm.config.setSecrets({ text: key })
-      await s.saveConfig({
-        onboarded: true,
-        pondRoot: pond || s.cfg?.pondRoot,
-        provider: { ...(s.cfg!.provider), mode, baseUrl, model }
-      })
+      const patch = buildConfig()
+      const ref = patch.providers![0].apiKeyEnv
+      if (key.trim()) await window.farm.credentials.set(ref, key.trim())
+      await s.saveConfig(patch)
       await s.createFish({ name: name.trim(), hue, tagline: tagline.trim() || undefined, seed })
     } finally {
       setBusy(false)
@@ -44,8 +67,10 @@ export function Onboarding(): ReactElement {
 
   const test = async (): Promise<void> => {
     setTestMsg('测试中…')
-    await s.saveConfig({ provider: { ...(s.cfg!.provider), mode, baseUrl, model } })
-    if (key) await window.farm.config.setSecrets({ text: key })
+    const patch = buildConfig(false)
+    const ref = patch.providers![0].apiKeyEnv
+    if (key.trim()) await window.farm.credentials.set(ref, key.trim())
+    await s.saveConfig(patch)
     const res = await s.testConnection('text')
     setTestMsg(res.ok ? `✅ ${res.detail}` : `❌ ${res.detail}`)
   }
@@ -107,6 +132,8 @@ export function Onboarding(): ReactElement {
               <div className="hint" style={{ lineHeight: 1.9 }}>
                 填你自己的 API。推荐 DeepSeek 官方：地址 <code>https://api.deepseek.com</code>，模型{' '}
                 <code>deepseek-chat</code>。也可以先选「排练模式」进去看看界面，随时再改。
+                <br />
+                密钥会单独存进 <code>.credentials.yaml</code>，配置里只留引用名。
               </div>
               <div className="field">
                 <label>运行模式</label>
@@ -117,23 +144,31 @@ export function Onboarding(): ReactElement {
               </div>
               {mode === 'api' ? (
                 <>
+                  <div className="grid2">
+                    <div className="field">
+                      <label>接口名称</label>
+                      <input type="text" value={providerName} onChange={(e) => setProviderName(e.target.value)} />
+                    </div>
+                    <div className="field">
+                      <label>模型</label>
+                      <input type="text" value={model} onChange={(e) => setModel(e.target.value)} />
+                    </div>
+                  </div>
                   <div className="field">
                     <label>接口地址</label>
                     <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label>模型</label>
-                    <input type="text" value={model} onChange={(e) => setModel(e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>API Key</label>
+                    <label>API Key（保存为 {looksDeepSeek ? 'DEEPSEEK_API_KEY' : 'CUSTOM_API_KEY'}）</label>
                     <input
                       type="password"
                       value={key}
                       placeholder="sk-..."
                       onChange={(e) => setKey(e.target.value)}
                     />
-                    <div className="hint">用系统 DPAPI 加密保存在本机，不进日志、不进导出包。</div>
+                    <div className="hint">
+                      用系统 DPAPI 加密存进 <code>.credentials.yaml</code>，不进 config.yaml、不进日志、不进导出包。
+                    </div>
                   </div>
                   <div className="row">
                     <button className="btn sm" onClick={() => void test()}>

@@ -2,7 +2,17 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow, Menu, app, dialog, ipcMain, protocol, shell } from 'electron'
 import { loadConfig, saveConfig } from './config'
-import { encryptionAvailable, getSecret, hasSecrets, setSecrets } from './secrets'
+import {
+  describeAll,
+  encryptionAvailable,
+  ensureCredentialsFile,
+  importFromDsh,
+  removeCredential,
+  resolveCredential,
+  setCredential
+} from './credentials'
+import { configFile, configPaths, credentialsFile } from './paths'
+import { resolveImageEndpoint, resolveTextEndpoint, resolveVisionEndpoint } from './llm/route'
 import {
   cachedProfile,
   createFish,
@@ -48,7 +58,17 @@ import { mediaUrl, registerMediaProtocol, registerPluginProtocol } from './plugi
 import { exportFish, exportMemory, importBundle } from './io/bundle'
 import { ensureDir, dirSize, pathExists, writeJSON } from './util/fsx'
 import { levelFromExp } from '@shared/persona'
-import type { AppConfig, AppInfo, FishProfile, ImportResult, MemoryEvent, SendInput, StreamEvent } from '@shared/types'
+import type {
+  AppConfig,
+  AppInfo,
+  DshImportResult,
+  FishProfile,
+  ImportResult,
+  MemoryEvent,
+  ProviderView,
+  SendInput,
+  StreamEvent
+} from '@shared/types'
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'fatfish', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
@@ -102,11 +122,11 @@ async function applyDecay(root: string, profile: FishProfile): Promise<FishProfi
  * ------------------------------------------------------------------ */
 
 async function llmFor(cfg: AppConfig): Promise<((system: string, user: string) => Promise<string>) | undefined> {
-  if (cfg.provider.mode !== 'api') return undefined
-  if (!cfg.provider.baseUrl) return undefined
-  const key = await getSecret('text')
+  if (cfg.mode !== 'api') return undefined
+  const ep = await resolveTextEndpoint(cfg)
+  if (!ep.baseUrl || !ep.model) return undefined
   return async (system: string, user: string): Promise<string> => {
-    const res = await chatCompletion(cfg.provider, key, {
+    const res = await chatCompletion(ep, {
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user }
@@ -130,6 +150,12 @@ async function runTurn(input: SendInput): Promise<void> {
   const assistantMsgId = input.assistantMsgId ?? newMessage('a', '').id
   const ctrl = new AbortController()
   inflight.set(chatId, ctrl)
+
+  // 解析三条路由：对话 / 视觉 / 生图各用各的 provider + 凭据
+  const textEp = await resolveTextEndpoint(cfg)
+  const visionEp = await resolveVisionEndpoint(cfg)
+  const imageEp = await resolveImageEndpoint(cfg)
+  const isMock = cfg.mode === 'mock' || !textEp.baseUrl || !textEp.model
 
   const finishStats = async (patch: { exp: number; tokens: number; mood: number; hunger: number }): Promise<void> => {
     await patchStats(root, input.fishId, (p) => {
@@ -156,8 +182,7 @@ async function runTurn(input: SendInput): Promise<void> {
     stream({ kind: 'start', fishId: input.fishId, chatId, msgId: assistantMsgId })
 
     // 2) 视觉描述（缺描述的图先补上，后面记忆与检索都要用）
-    if (cfg.provider.mode === 'api' && cfg.provider.vision.enabled && mediaIds.length) {
-      const vkey = (await getSecret('vision')) || (await getSecret('text'))
+    if (!isMock && visionEp && mediaIds.length) {
       for (const mid of mediaIds) {
         const meta = await getMedia(root, input.fishId, mid)
         if (!meta || meta.caption) continue
@@ -165,7 +190,7 @@ async function runTurn(input: SendInput): Promise<void> {
         try {
           const dataUrl = await toDataUrl(root, input.fishId, mid)
           if (dataUrl) {
-            const cap = await captionImage(cfg.provider, vkey, dataUrl, input.text.slice(0, 120))
+            const cap = await captionImage(visionEp, dataUrl, input.text.slice(0, 120))
             if (cap) await setCaption(root, input.fishId, mid, cap)
           }
         } catch {
@@ -183,7 +208,7 @@ async function runTurn(input: SendInput): Promise<void> {
 
     const media = await loadIndex(root, input.fishId)
     const captionOf = (mid: string): string | undefined => media.find((m) => m.id === mid)?.caption
-    const visionOn = cfg.provider.mode === 'api' && cfg.provider.vision.enabled
+    const visionOn = !isMock && Boolean(visionEp)
     const dataUrls = new Map<string, string>()
     if (visionOn) {
       for (const mid of mediaIds.slice(0, 3)) {
@@ -203,7 +228,7 @@ async function runTurn(input: SendInput): Promise<void> {
       visionEnabled: visionOn,
       captionOf,
       dataUrlOf: (mid) => dataUrls.get(mid),
-      drawEnabled: cfg.provider.mode === 'api' && cfg.memory.allowDraw && cfg.provider.image.enabled
+      drawEnabled: !isMock && cfg.memory.allowDraw && Boolean(imageEp)
     })
 
     let text = ''
@@ -211,7 +236,7 @@ async function runTurn(input: SendInput): Promise<void> {
     let usage: { i: number; o: number } | undefined
     let sticker: string | undefined
 
-    if (cfg.provider.mode === 'mock' || !cfg.provider.baseUrl) {
+    if (isMock) {
       const mock = mockReply({
         profile,
         text: input.text,
@@ -229,8 +254,7 @@ async function runTurn(input: SendInput): Promise<void> {
       }
       if (reason) stream({ kind: 'reason', fishId: input.fishId, chatId, msgId: assistantMsgId, text: reason })
     } else {
-      const key = await getSecret('text')
-      const res = await chatCompletion(cfg.provider, key, {
+      const res = await chatCompletion(textEp, {
         messages,
         stream: true,
         signal: ctrl.signal,
@@ -249,7 +273,7 @@ async function runTurn(input: SendInput): Promise<void> {
     const citeCardIds = anchors
       .map((a) => hits.find((h) => h.anchor === a)?.card.id)
       .filter((v): v is string => Boolean(v))
-    const drawPrompt = cfg.memory.allowDraw && cfg.provider.image.enabled ? parseDrawToken(text) : null
+    const drawPrompt = !isMock && cfg.memory.allowDraw && imageEp ? parseDrawToken(text) : null
     sticker = sticker ?? parseStickerToken(text) ?? undefined
     const clean = text
       .replace(/\[\[fish:\s*[a-z]+\s*\]\]/gi, '')
@@ -268,10 +292,10 @@ async function runTurn(input: SendInput): Promise<void> {
     })
     await appendMessage(root, input.fishId, chatId, msg)
 
-    if (drawPrompt) {
+    if (drawPrompt && imageEp) {
       stream({ kind: 'stage', fishId: input.fishId, chatId, msgId: assistantMsgId, stage: '在给你画…' })
       try {
-        const img = await generateImage(cfg.provider, await getSecret('image'), drawPrompt)
+        const img = await generateImage(imageEp, drawPrompt)
         const meta = await importBuffer(root, input.fishId, img.buffer, `draw.${img.ext}`, 'pic')
         await patchMessage(root, input.fishId, chatId, assistantMsgId, {
           imgs: [...(msg.imgs ?? []), meta.id]
@@ -337,7 +361,7 @@ async function runDistill(fishId: string, chatId: string, force: boolean): Promi
       every: cfg.memory.every,
       maxCards: cfg.memory.maxCards,
       force,
-      llm: cfg.provider.mode === 'api' ? await llmFor(cfg) : undefined
+      llm: cfg.mode === 'api' ? await llmFor(cfg) : undefined
     })
     const stats = await memoryStats(root, fishId)
     if (res.added === 0 && res.compacted === 0 && !force) {
@@ -363,7 +387,9 @@ async function greet(fishId: string, chatId: string): Promise<void> {
   let text = ''
   let reason = ''
   try {
-    if (cfg.provider.mode === 'mock' || !cfg.provider.baseUrl) {
+    const textEp = await resolveTextEndpoint(cfg)
+    const isMock = cfg.mode === 'mock' || !textEp.baseUrl || !textEp.model
+    if (isMock) {
       const mock = mockReply({ profile, text: '你好', hasImages: false, hits: [] })
       text = `（从水草里钻出来）你来啦。${mock.text}`
       reason = mock.reason
@@ -372,8 +398,7 @@ async function greet(fishId: string, chatId: string): Promise<void> {
         await new Promise((r) => setTimeout(r, 10))
       }
     } else {
-      const key = await getSecret('text')
-      const res = await chatCompletion(cfg.provider, key, {
+      const res = await chatCompletion(textEp, {
         messages: [
           {
             role: 'system',
@@ -500,8 +525,19 @@ async function openPond(): Promise<void> {
  * ------------------------------------------------------------------ */
 
 function registerIpc(): void {
+  const providerViews = async (): Promise<ProviderView[]> => {
+    const cfg = await loadConfig()
+    const descs = await describeAll(cfg.providers.map((p) => p.apiKeyEnv))
+    return cfg.providers.map((p) => ({
+      ...p,
+      credential:
+        descs.find((d) => d.ref === p.apiKeyEnv) ?? { ref: p.apiKeyEnv, configured: false, source: 'none' }
+    }))
+  }
+
   ipcMain.handle('app:info', async (): Promise<AppInfo> => {
     const cfg = await loadConfig()
+    const paths = configPaths()
     return {
       version: app.getVersion(),
       electron: process.versions.electron,
@@ -509,8 +545,11 @@ function registerIpc(): void {
       chrome: process.versions.chrome,
       platform: process.platform,
       userData: app.getPath('userData'),
+      configDir: paths.configDir,
+      configFile: paths.configFile,
+      credentialsFile: paths.credentialsFile,
       pondRoot: cfg.pondRoot,
-      hasSecret: await hasSecrets(),
+      credentials: await describeAll(cfg.providers.map((p) => p.apiKeyEnv)),
       bundledPluginsDir: bundledPluginsDir()
     }
   })
@@ -526,27 +565,77 @@ function registerIpc(): void {
     return res.canceled ? null : res.filePaths[0]
   })
 
-  // ---- 配置 ----
+  // ---- 配置（v2：config.yaml + .credentials.yaml）----
   ipcMain.handle('config:get', () => loadConfig())
   ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => saveConfig(patch))
-  ipcMain.handle('config:secrets', async (_e, patch: Record<string, string>) => {
-    await setSecrets(patch)
-    return hasSecrets()
+  ipcMain.handle('config:providers', () => providerViews())
+  ipcMain.handle('config:paths', () => configPaths())
+  ipcMain.handle('config:open', async (_e, kind: 'config' | 'credentials' = 'config') => {
+    const file = kind === 'credentials' ? credentialsFile() : configFile()
+    if (kind === 'credentials' && !(await pathExists(file))) await ensureCredentialsFile()
+    return shell.openPath(file)
   })
-  ipcMain.handle('config:secretsState', () => hasSecrets())
+
+  ipcMain.handle('credentials:set', async (_e, ref: string, value: string) => {
+    await setCredential(ref, value)
+    return providerViews()
+  })
+  ipcMain.handle('credentials:remove', async (_e, ref: string) => {
+    await removeCredential(ref)
+    return providerViews()
+  })
+  ipcMain.handle('credentials:describe', (_e, ref: string) => describeAll([ref]).then((x) => x[0]))
+  ipcMain.handle('credentials:importDsh', async (): Promise<DshImportResult> => importFromDsh())
+
+  ipcMain.handle('providers:test', async (_e, providerId: string) => {
+    const cfg = await loadConfig()
+    const provider = cfg.providers.find((p) => p.id === providerId)
+    if (!provider) return { ok: false, detail: '找不到这个 provider' }
+    const cred = await resolveCredential(provider.apiKeyEnv)
+    if (!cred && !/localhost|127\.0\.0\.1/i.test(provider.baseUrl)) {
+      return { ok: false, detail: `没有找到密钥 ${provider.apiKeyEnv}（.credentials.yaml 或同名环境变量）` }
+    }
+    const ep = {
+      providerId: provider.id,
+      providerName: provider.name,
+      mode: cfg.mode,
+      baseUrl: provider.baseUrl,
+      apiKey: cred?.value ?? '',
+      apiKeyEnv: provider.apiKeyEnv,
+      apiKeySource: cred?.source ?? 'none',
+      model: provider.models[0] ?? 'gpt-3.5-turbo',
+      temperature: 0,
+      maxTokens: 8,
+      timeoutMs: 30_000,
+      reasoning: false,
+      ...(provider.headers ? { headers: provider.headers } : {})
+    } as const
+    return testConnection(ep)
+  })
+
   ipcMain.handle('config:test', async (_e, target: 'text' | 'vision' | 'image' = 'text') => {
     const cfg = await loadConfig()
-    if (cfg.provider.mode === 'mock') return { ok: true, detail: '当前是排练模式，不需要联网' }
+    if (cfg.mode === 'mock') return { ok: true, detail: '当前是排练模式，不需要联网' }
     if (target === 'image') {
+      const ep = await resolveImageEndpoint(cfg)
+      if (!ep) return { ok: false, detail: '生图路由没有启用（或没有可用 provider）' }
+      if (!ep.baseUrl) return { ok: false, detail: '生图 provider 的接口地址为空' }
+      if (!ep.model) return { ok: false, detail: '生图路由还没有选模型' }
       try {
-        const img = await generateImage(cfg.provider, await getSecret('image'), 'a cute blue whale girl eating rice, chibi')
+        const img = await generateImage(ep, 'a cute blue whale girl eating rice, chibi')
         return { ok: true, detail: `生图接口正常，收到 ${Math.round(img.buffer.byteLength / 1024)} KB` }
       } catch (e) {
         return { ok: false, detail: (e as Error).message }
       }
     }
-    const key = target === 'vision' ? (await getSecret('vision')) || (await getSecret('text')) : await getSecret('text')
-    return testConnection(cfg.provider, key)
+    const ep = target === 'vision' ? await resolveVisionEndpoint(cfg) : await resolveTextEndpoint(cfg)
+    if (!ep) return { ok: false, detail: '视觉路由没有启用（或没有可用 provider）' }
+    if (!ep.baseUrl) return { ok: false, detail: '接口地址为空' }
+    if (!ep.model) return { ok: false, detail: '还没有选模型' }
+    if (ep.apiKeySource === 'none' && !/localhost|127\.0\.0\.1/i.test(ep.baseUrl)) {
+      return { ok: false, detail: `没有找到密钥 ${ep.apiKeyEnv}（.credentials.yaml 或同名环境变量）` }
+    }
+    return testConnection(ep)
   })
 
   // ---- 鱼塘 ----
@@ -720,12 +809,12 @@ function registerIpc(): void {
   )
   ipcMain.handle('media:caption', async (_e, fishId: string, mediaId: string) => {
     const cfg = await loadConfig()
-    if (cfg.provider.mode !== 'api' || !cfg.provider.vision.enabled) throw new Error('没有启用视觉模型')
+    const ep = await resolveVisionEndpoint(cfg)
+    if (cfg.mode !== 'api' || !ep) throw new Error('没有启用视觉模型')
     const root = await pondRoot()
     const url = await toDataUrl(root, fishId, mediaId)
     if (!url) throw new Error('读不到这张图')
-    const key = (await getSecret('vision')) || (await getSecret('text'))
-    const cap = await captionImage(cfg.provider, key, url, '')
+    const cap = await captionImage(ep, url, '')
     await setCaption(root, fishId, mediaId, cap)
     return cap
   })
@@ -758,7 +847,7 @@ function registerIpc(): void {
     const before = await memoryStats(root, fishId)
     const merged = await compact(root, fishId, {
       maxCards: 0,
-      llm: cfg.provider.mode === 'api' ? await llmFor(cfg) : undefined
+      llm: cfg.mode === 'api' ? await llmFor(cfg) : undefined
     })
     const after = await memoryStats(root, fishId)
     return { merged, before, after }
@@ -916,6 +1005,37 @@ async function runSelfTest(reportPath: string): Promise<void> {
 
   let fishId = ''
   let chatId = ''
+  await step('config v2 (config.yaml + credentials)', async () => {
+    const cfg = await loadConfig()
+    const paths = configPaths()
+    if (!(await pathExists(paths.configFile))) throw new Error('没有生成 config.yaml')
+    if (!cfg.providers.length) throw new Error('providers 为空')
+    if (!cfg.routes.text.providerId) throw new Error('routes.text 为空')
+    return {
+      configFile: paths.configFile,
+      credentialsFile: paths.credentialsFile,
+      version: cfg.v,
+      mode: cfg.mode,
+      providers: cfg.providers.map((p) => ({ id: p.id, apiKeyEnv: p.apiKeyEnv, baseUrl: p.baseUrl })),
+      textRoute: cfg.routes.text
+    }
+  })
+  await step('credential: store + env fallback', async () => {
+    const envRef = 'FATFISH_SELFTEST_ENV_KEY'
+    process.env[envRef] = 'env-value'
+    const envDesc = (await describeAll([envRef]))[0]
+    if (envDesc.source !== 'env' || !envDesc.configured) throw new Error('环境变量回落失败')
+
+    await setCredential('FATFISH_SELFTEST_STORE_KEY', 'store-value')
+    const storeDesc = (await describeAll(['FATFISH_SELFTEST_STORE_KEY']))[0]
+    const resolved = await resolveCredential('FATFISH_SELFTEST_STORE_KEY')
+    await removeCredential('FATFISH_SELFTEST_STORE_KEY')
+    if (storeDesc.source !== 'store' || resolved?.value !== 'store-value') {
+      throw new Error('credentials 存储/解析失败')
+    }
+    delete process.env[envRef]
+    return { env: envDesc, store: { ...storeDesc, valueMatched: true } }
+  })
   await step('create fish', async () => {
     const fish = await createFish(root, '测试肥鱼')
     fishId = fish.id
