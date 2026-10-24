@@ -4,9 +4,9 @@
  */
 import { createHash } from 'node:crypto'
 import { deflateSync, gzipSync } from 'node:zlib'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { newWorkDir } from './lib/work-dir.mjs'
 
 /* ----------------------------- 极简 PNG 编码器 ----------------------------- */
 
@@ -108,9 +108,8 @@ function gz(path, value) {
   writeFileSync(path, gzipSync(Buffer.from(JSON.stringify(value), 'utf8'), { level: 9 }))
 }
 
-const baseRoot = (process.env.FATFISH_DEMO_BASE || tmpdir()).trim()
-mkdirSync(baseRoot, { recursive: true })
-const base = mkdtempSync(join(baseRoot, 'fatfish-demo-'))
+// 规则 18：演示数据只放项目内 .tmp/demo，绝不写系统 TEMP 或盘根
+const base = newWorkDir('demo', 'fatfish-demo-')
 const userData = join(base, 'userData')
 const pond = join(base, 'pond')
 mkdirSync(userData, { recursive: true })

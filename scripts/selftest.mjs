@@ -3,14 +3,15 @@
  * 用法：pnpm build && node scripts/selftest.mjs
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { cleanWorkDir, newWorkDir } from './lib/work-dir.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const electron = join(root, 'node_modules', 'electron', 'dist', 'electron.exe')
-const base = mkdtempSync(join(tmpdir(), 'fatfish-selftest-'))
+// 规则 18：自检数据只放项目内 .tmp/selftest，结束后清理
+const base = newWorkDir('selftest', 'fatfish-selftest-')
 const userData = join(base, 'userData')
 const pond = join(base, 'pond')
 const report = join(base, 'report.json')
@@ -48,15 +49,22 @@ writeFileSync(
 const env = { ...process.env, FATFISH_USER_DATA: userData, FATFISH_SELFTEST: report }
 delete env.ELECTRON_RUN_AS_NODE
 
-const run = spawnSync(electron, ['.'], { cwd: root, stdio: 'inherit', env })
-if (!existsSync(report)) {
-  console.error('❌ 自检没有产出报告，退出码', run.status)
-  process.exit(1)
+let exitCode = 0
+try {
+  const run = spawnSync(electron, ['.'], { cwd: root, stdio: 'inherit', env })
+  if (!existsSync(report)) {
+    console.error('❌ 自检没有产出报告，退出码', run.status)
+    exitCode = 1
+  } else {
+    const data = JSON.parse(readFileSync(report, 'utf8'))
+    for (const step of data.report) {
+      console.log(`${step.ok ? '✅' : '❌'} ${step.name}${step.error ? ` — ${step.error}` : ''}`)
+      if (step.detail) console.log('   ', JSON.stringify(step.detail).slice(0, 300))
+    }
+    console.log(data.ok ? '\n✅ 自检全部通过' : '\n❌ 自检有失败项')
+    exitCode = data.ok ? 0 : 1
+  }
+} finally {
+  cleanWorkDir('selftest')
 }
-const data = JSON.parse(readFileSync(report, 'utf8'))
-for (const step of data.report) {
-  console.log(`${step.ok ? '✅' : '❌'} ${step.name}${step.error ? ` — ${step.error}` : ''}`)
-  if (step.detail) console.log('   ', JSON.stringify(step.detail).slice(0, 300))
-}
-console.log(data.ok ? '\n✅ 自检全部通过' : '\n❌ 自检有失败项')
-process.exit(data.ok ? 0 : 1)
+process.exit(exitCode)
