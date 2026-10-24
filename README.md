@@ -53,12 +53,16 @@
 
 ### 直接使用（安装包）
 
+从 [Releases](https://github.com/dboycht/deepseek-fatfish-farm/releases) 下载
+`deepseek-fatfish-farm-1.0.1-setup.exe`，双击安装。
+
+也可以自己打包：
+
 ```bash
 pnpm dist
 ```
 
-构建完成后在 `release/` 里拿到 `deepseek-fatfish-farm-*-setup.exe`，双击安装。
-（当前版本尚未发布 Release；如需从 GitHub 下载，等作者打完 tag 后即可在 Releases 页看到。）
+构建完成后在 `release/` 里拿到 `deepseek-fatfish-farm-*-setup.exe`。
 
 > 当前版本只做了 Windows（x64）验证。macOS / Linux 的配置已就绪但未实测。
 
@@ -74,7 +78,7 @@ pnpm dist             # 打包 Windows 安装包到 release/
 其他脚本：
 
 ```bash
-pnpm test             # 记忆检索 / 性格 / gzip 落盘 等 10 项单测
+pnpm test             # 记忆/检索/配置/贴纸 等 24 项单测
 node scripts/selftest.mjs   # 真实 Electron 里跑完整数据链路（建鱼→蒸馏→检索→导出→导入）
 node scripts/screenshot.mjs # 实机截图到 docs/screenshots/
 ```

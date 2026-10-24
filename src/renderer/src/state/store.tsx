@@ -748,6 +748,10 @@ export function StoreProvider({ children }: { children: ReactNode }): ReactNode 
       if (scene === 'reason') {
         setTimeout(() => document.querySelector<HTMLDetailsElement>('details.reason')?.setAttribute('open', ''), 600)
       }
+      if (scene === 'about') {
+        setTimeout(() => document.querySelector<HTMLElement>('[data-testid="open-settings"]')?.click(), 400)
+        setTimeout(() => document.querySelector<HTMLElement>('[data-tab="about"]')?.click(), 1000)
+      }
     })
     return off
   }, [])

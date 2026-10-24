@@ -34,7 +34,7 @@ function TitleBar(): ReactElement {
         >
           {s.showMemory ? '收起面板' : '记忆面板'}
         </button>
-        <button className="btn sm" onClick={() => s.setSettingsOpen(true)}>
+        <button className="btn sm" data-testid="open-settings" onClick={() => s.setSettingsOpen(true)}>
           ⚙ 设置
         </button>
       </div>

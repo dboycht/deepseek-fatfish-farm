@@ -143,7 +143,12 @@ export function SettingsModal(): ReactElement | null {
         </div>
         <div className="settings-tabs">
           {TABS.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+            <button
+              key={t.id}
+              data-tab={t.id}
+              className={`tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
               {t.label}
             </button>
           ))}

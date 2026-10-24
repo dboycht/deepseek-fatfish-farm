@@ -108,7 +108,9 @@ function gz(path, value) {
   writeFileSync(path, gzipSync(Buffer.from(JSON.stringify(value), 'utf8'), { level: 9 }))
 }
 
-const base = mkdtempSync(join(tmpdir(), 'fatfish-demo-'))
+const baseRoot = (process.env.FATFISH_DEMO_BASE || tmpdir()).trim()
+mkdirSync(baseRoot, { recursive: true })
+const base = mkdtempSync(join(baseRoot, 'fatfish-demo-'))
 const userData = join(base, 'userData')
 const pond = join(base, 'pond')
 mkdirSync(userData, { recursive: true })

@@ -26,7 +26,11 @@ if (!existsSync(join(root, 'out', 'main', 'index.js'))) {
 }
 
 for (const scene of scenes) {
-  const seed = spawnSync(process.execPath, [join(root, 'scripts', 'seed-demo.mjs')], { encoding: 'utf8' })
+  const seed = spawnSync(process.execPath, [join(root, 'scripts', 'seed-demo.mjs')], {
+    encoding: 'utf8',
+    // 中性路径：公开截图里不出现本机用户名
+    env: { ...process.env, FATFISH_DEMO_BASE: process.env.FATFISH_DEMO_BASE || 'D:\\fatfish-demo' }
+  })
   if (seed.status !== 0) {
     console.error('造演示数据失败：', seed.stderr)
     process.exit(1)
